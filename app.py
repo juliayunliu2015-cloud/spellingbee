@@ -11,13 +11,9 @@ from gtts import gTTS
 st.set_page_config(page_title="Spelling Bee 2026", page_icon="🐝", layout="centered")
 # --- ENCOURAGEMENT HEADER ---
 st.markdown("""
-    <div style="background-color:#FFD700; padding:20px; border-radius:15px; text-align:center; margin-bottom:25px; border: 2px solid #DAA520;">
-        <h1 style="color:#000; margin:0; font-family: 'Arial Black', sans-serif;">🏆 GO FOR THE GOLD, VIVIAN! 🏆</h1>
-        <p style="color:#333; font-size:1.2rem; font-weight:bold; margin:10px 0 0 0;">
-            "Every word you master today is a step closer to the 2026 Trophy! 🐝✨"
-        </p>
-    </div>
+
 """, unsafe_allow_input=True)
+
 DB_PATH = "scores.db"
 DATA_FILE = "Spelling bee 2026.xlsx"
 DAILY_EXAM_GOAL = 33
@@ -216,4 +212,5 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
