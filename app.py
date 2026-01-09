@@ -42,27 +42,35 @@ def init_db():
     conn.commit()
     conn.close()
 
-# --- DATA LOADING ---
+# --- ROBUST DATA LOADING ---
 @st.cache_data
 def load_words():
     if not os.path.exists(DATA_FILE):
         st.error(f"File {DATA_FILE} not found!")
         return pd.DataFrame(columns=["word", "definition", "sentence"])
     
-    df = pd.read_excel(DATA_FILE)
-    
-    # Identify Columns
-    word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling"]), df.columns[0])
-    def_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["def", "meaning", "desc"])), None)
-    # Search for a sentence/example column
-    sent_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["sentence", "example", "sample"])), None)
-    
-    df_clean = df[[word_col]].copy()
-    df_clean.columns = ["word"]
-    df_clean["definition"] = df[def_col].fillna("").astype(str) if def_col else "No definition available."
-    df_clean["sentence"] = df[sent_col].fillna("").astype(str) if sent_col else "No sample sentence available."
-    
-    return df_clean.dropna(subset=["word"]).sort_values("word").reset_index(drop=True)
+    try:
+        df = pd.read_excel(DATA_FILE)
+        
+        # Smart Column Detection
+        word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling"]), df.columns[0])
+        def_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["def", "meaning", "desc"])), None)
+        sent_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["sentence", "example", "sample"])), None)
+        
+        # Build clean data to ensure keys always exist
+        clean_rows = []
+        for _, row in df.iterrows():
+            if pd.isna(row[word_col]): continue
+            clean_rows.append({
+                "word": str(row[word_col]).strip(),
+                "definition": str(row[def_col]).strip() if def_col and not pd.isna(row[def_col]) else "No definition available.",
+                "sentence": str(row[sent_col]).strip() if sent_col and not pd.isna(row[sent_col]) else "No sample sentence available."
+            })
+        
+        return pd.DataFrame(clean_rows).sort_values("word").reset_index(drop=True)
+    except Exception as e:
+        st.error(f"Error loading Excel: {e}")
+        return pd.DataFrame(columns=["word", "definition", "sentence"])
 
 def mask_vowels(word):
     return "".join("_" if char.lower() in "aeiou" else char for char in word)
@@ -77,7 +85,7 @@ if "current_word" not in st.session_state:
 if "attempts" not in st.session_state:
     st.session_state.attempts = 0
 if "last_result" not in st.session_state:
-    st.session_state.last_result = None # Stores (is_correct, word, definition, sentence)
+    st.session_state.last_result = None
 
 # --- UI TABS ---
 tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Alphabetical Learn", "📊 My Progress"])
@@ -96,16 +104,26 @@ with tab_exam:
     if exam_group == "All Words":
         available_words = words_df
     else:
-        words_per_group = len(words_df) // 13
+        words_per_group = max(1, len(words_df) // 13)
         start_idx = (exam_group - 1) * words_per_group
         end_idx = start_idx + words_per_group if exam_group < 13 else len(words_df)
         available_words = words_df.iloc[start_idx:end_idx]
 
+    # --- SAFETY CHECK: Prevent KeyError from old sessions ---
+    if st.session_state.current_word is not None:
+        # If the old word object is missing the "sentence" key, reset it
+        if "sentence" not in st.session_state.current_word:
+            st.session_state.current_word = None
+
     # Pick a word if needed
     if st.session_state.current_word is None or st.session_state.current_word["word"] not in available_words["word"].values:
-        st.session_state.current_word = available_words.sample(1).iloc[0]
-        st.session_state.attempts = 0
-        st.session_state.last_result = None
+        if not available_words.empty:
+            st.session_state.current_word = available_words.sample(1).iloc[0]
+            st.session_state.attempts = 0
+            st.session_state.last_result = None
+        else:
+            st.warning("No words found in this group.")
+            st.stop()
 
     # Progress Info
     conn = get_db_connection()
@@ -133,17 +151,15 @@ with tab_exam:
         st.session_state.attempts += 1
         is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
         
-        # Log to DB
         conn = get_db_connection()
         conn.execute("INSERT INTO scores (date, word, correctly_spelled, attempts) VALUES (?, ?, ?, ?)",
                      (today, word_to_spell, int(is_correct), st.session_state.attempts))
         
-        # Save result info to session state for display
         st.session_state.last_result = {
             "is_correct": is_correct,
             "word": word_to_spell,
             "definition": st.session_state.current_word["definition"],
-            "sentence": st.session_state.current_word["sentence"]
+            "sentence": st.session_state.current_word.get("sentence", "No sample sentence available.")
         }
 
         if is_correct:
@@ -152,7 +168,7 @@ with tab_exam:
                 VALUES (?, 1, 1) ON CONFLICT(date) DO UPDATE SET 
                 correct_count = correct_count + 1, total_attempted = total_attempted + 1
             """, (today,))
-            # Refresh for next word
+            # Prep for next word
             st.session_state.current_word = available_words.sample(1).iloc[0]
             st.session_state.attempts = 0
         else:
@@ -181,11 +197,11 @@ with tab_exam:
             st.session_state.last_result = None
             st.rerun()
 
-# --- TAB 2 & 3 (Same as previous provided code) ---
+# --- TABS 2 & 3 ---
 with tab_learn:
     st.header("Learn by Groups")
     group_num = st.selectbox("Select Learning Group (1-13):", range(1, 14), key="learn_group")
-    words_per_group = len(words_df) // 13
+    words_per_group = max(1, len(words_df) // 13)
     start_idx = (group_num - 1) * words_per_group
     end_idx = start_idx + words_per_group if group_num < 13 else len(words_df)
     current_group_df = words_df.iloc[start_idx:end_idx]
