@@ -4,18 +4,12 @@ import sqlite3
 import os
 import random
 import io
-import hashlib
-from datetime import date, datetime, timedelta
+from datetime import date
 from gtts import gTTS
 
 # --- CONFIGURATION & PAGE SETUP ---
-st.set_page_config(
-    page_title="Spelling Bee 2026",
-    page_icon="🐝",
-    layout="centered"
-)
+st.set_page_config(page_title="Spelling Bee 2026", page_icon="🐝", layout="centered")
 
-# Constants
 DB_PATH = "scores.db"
 DATA_FILE = "Spelling bee 2026.xlsx"
 DAILY_EXAM_GOAL = 33
@@ -27,7 +21,6 @@ def get_db_connection():
     return conn
 
 def init_db():
-    """Initializes the SQLite database tables."""
     conn = get_db_connection()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS scores (
@@ -35,8 +28,7 @@ def init_db():
             date TEXT NOT NULL,
             word TEXT NOT NULL,
             correctly_spelled INTEGER NOT NULL,
-            attempts INTEGER NOT NULL,
-            mode TEXT DEFAULT 'exam'
+            attempts INTEGER NOT NULL
         )
     """)
     conn.execute("""
@@ -53,159 +45,151 @@ def init_db():
 # --- DATA LOADING ---
 @st.cache_data
 def load_words():
-    """Loads and cleans the word list from Excel."""
     if not os.path.exists(DATA_FILE):
-        st.error(f"Error: '{DATA_FILE}' not found in the project directory.")
+        st.error(f"File {DATA_FILE} not found!")
         return pd.DataFrame(columns=["word", "definition"])
     
-    try:
-        df = pd.read_excel(DATA_FILE)
-        # Identify the word column
-        word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling", "term"]), df.columns[0])
-        # Identify definition column
-        def_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["def", "mean", "desc"])), None)
-        
-        df_clean = df[[word_col]].copy()
-        df_clean.columns = ["word"]
-        df_clean["definition"] = df[def_col].fillna("").astype(str) if def_col else ""
-        return df_clean.dropna(subset=["word"])
-    except Exception as e:
-        st.error(f"Failed to read Excel file: {e}")
-        return pd.DataFrame(columns=["word", "definition"])
+    df = pd.read_excel(DATA_FILE)
+    word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling"]), df.columns[0])
+    def_col = next((c for c in df.columns if "def" in str(c).lower() or "mean" in str(c).lower()), None)
+    
+    df_clean = df[[word_col]].copy()
+    df_clean.columns = ["word"]
+    df_clean["definition"] = df[def_col].fillna("").astype(str) if def_col else ""
+    # Sort them alphabetically once for consistent grouping
+    return df_clean.dropna(subset=["word"]).sort_values("word").reset_index(drop=True)
 
-# --- HELPER FUNCTIONS ---
-def mask_vowels(word: str) -> str:
-    vowels = "AEIOUaeiou"
-    return "".join("_" if char in vowels else char for char in word)
-
-def get_audio_bytes(word: str):
-    """Generates gTTS audio in memory."""
-    try:
-        tts = gTTS(text=str(word), lang="en")
-        audio_fp = io.BytesIO()
-        tts.write_to_fp(audio_fp)
-        return audio_fp
-    except Exception as e:
-        st.error(f"Audio generation error: {e}")
-        return None
+def mask_vowels(word):
+    return "".join("_" if char.lower() in "aeiou" else char for char in word)
 
 # --- APP INITIALIZATION ---
 init_db()
 words_df = load_words()
 
+# Initialize Session State
 if "current_word" not in st.session_state:
-    st.session_state.current_word = words_df.sample(1).iloc[0] if not words_df.empty else None
+    st.session_state.current_word = None
 if "attempts" not in st.session_state:
     st.session_state.attempts = 0
-if "feedback" not in st.session_state:
-    st.session_state.feedback = None
 
 # --- UI TABS ---
-tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Alphabetical Learn", "📊 Performance"])
+tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Alphabetical Learn", "📊 My Progress"])
 
 # --- TAB 1: DAILY EXAM ---
 with tab_exam:
-    st.header("Daily Spelling Challenge")
+    st.header("Daily Challenge")
     
-    # Progress Bar
+    # --- NEW: GROUP SELECTOR FOR EXAM ---
+    exam_group = st.selectbox(
+        "Select Exam Group (1-13) or Practice All:",
+        options=["All Words"] + list(range(1, 14)),
+        index=0,
+        help="Choose a specific alphabetical group to focus your exam on."
+    )
+
+    # Filter words based on selection
+    if exam_group == "All Words":
+        available_words = words_df
+    else:
+        words_per_group = len(words_df) // 13
+        start_idx = (exam_group - 1) * words_per_group
+        end_idx = start_idx + words_per_group if exam_group < 13 else len(words_df)
+        available_words = words_df.iloc[start_idx:end_idx]
+
+    # Pick a word if none is active
+    if st.session_state.current_word is None or st.session_state.current_word["word"] not in available_words["word"].values:
+        st.session_state.current_word = available_words.sample(1).iloc[0]
+        st.session_state.attempts = 0
+
+    # Progress Tracking
     conn = get_db_connection()
     today = date.today().isoformat()
-    progress_row = conn.execute("SELECT correct_count FROM daily_exam_progress WHERE date = ?", (today,)).fetchone()
-    score_today = progress_row[0] if progress_row else 0
+    row = conn.execute("SELECT correct_count FROM daily_exam_progress WHERE date = ?", (today,)).fetchone()
+    score_today = row[0] if row else 0
     conn.close()
 
     st.progress(min(score_today / DAILY_EXAM_GOAL, 1.0))
-    st.write(f"Daily Progress: **{score_today} / {DAILY_EXAM_GOAL}** correct words.")
+    st.write(f"Goal: {score_today}/{DAILY_EXAM_GOAL} correct today")
 
-    if st.session_state.current_word is not None:
-        word_to_spell = st.session_state.current_word["word"]
-        
-        # Audio Playback
-        audio_data = get_audio_bytes(word_to_spell)
-        if audio_data:
-            st.audio(audio_data, format="audio/mp3")
-        
-        # Input Form
-        with st.form(key="exam_form", clear_on_submit=True):
-            user_input = st.text_input("Listen and type the word:")
-            submit_btn = st.form_submit_button("Submit")
+    # Audio Generation
+    word_to_spell = st.session_state.current_word["word"]
+    tts = gTTS(text=str(word_to_spell), lang="en")
+    audio_fp = io.BytesIO()
+    tts.write_to_fp(audio_fp)
+    st.audio(audio_fp, format="audio/mp3")
 
-        if submit_btn:
-            st.session_state.attempts += 1
-            is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
+    # Spelling Form
+    with st.form(key="spell_form", clear_on_submit=True):
+        user_input = st.text_input("Listen and type the word:")
+        submit = st.form_submit_button("Check Spelling")
+
+    if submit:
+        st.session_state.attempts += 1
+        is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
+        
+        conn = get_db_connection()
+        conn.execute("INSERT INTO scores (date, word, correctly_spelled, attempts) VALUES (?, ?, ?, ?)",
+                     (today, word_to_spell, int(is_correct), st.session_state.attempts))
+        
+        if is_correct:
+            conn.execute("""
+                INSERT INTO daily_exam_progress (date, correct_count, total_attempted)
+                VALUES (?, 1, 1) ON CONFLICT(date) DO UPDATE SET 
+                correct_count = correct_count + 1, total_attempted = total_attempted + 1
+            """, (today,))
+            st.success(f"✅ Correct! '{word_to_spell}'")
+            if st.session_state.current_word["definition"]:
+                st.info(f"Meaning: {st.session_state.current_word['definition']}")
             
-            # Database Logging
-            conn = get_db_connection()
-            conn.execute("INSERT INTO scores (date, word, correctly_spelled, attempts, mode) VALUES (?, ?, ?, ?, ?)",
-                         (today, word_to_spell, int(is_correct), st.session_state.attempts, 'exam'))
-            
-            if is_correct:
-                conn.execute("""
-                    INSERT INTO daily_exam_progress (date, correct_count, total_attempted)
-                    VALUES (?, 1, 1) ON CONFLICT(date) DO UPDATE SET 
-                    correct_count = correct_count + 1, total_attempted = total_attempted + 1
-                """, (today,))
-                st.success(f"✅ Correct! The word was: **{word_to_spell}**")
-                if st.session_state.current_word["definition"]:
-                    st.info(f"**Meaning:** {st.session_state.current_word['definition']}")
-                
-                # Setup next word
-                st.session_state.current_word = words_df.sample(1).iloc[0]
-                st.session_state.attempts = 0
-                st.button("Next Word ➡️")
-            else:
-                st.error("❌ Incorrect. Listen again and try your best!")
-            
-            conn.commit()
-            conn.close()
-    else:
-        st.warning("Word list is empty. Please check your Excel file.")
+            # Pick a NEW word from the same selected group
+            st.session_state.current_word = available_words.sample(1).iloc[0]
+            st.session_state.attempts = 0
+            st.button("Next Word")
+        else:
+            st.error(f"❌ Incorrect. Try again!")
+        
+        conn.commit()
+        conn.close()
 
 # --- TAB 2: ALPHABETICAL LEARN ---
 with tab_learn:
-    st.header("Learning Groups")
-    st.write("Words are split into 13 alphabetical groups (~33 words each).")
+    st.header("Learn by Groups")
+    group_num = st.selectbox("Select Learning Group (1-13):", range(1, 14), key="learn_group")
     
-    # Sort and Group Logic
-    df_sorted = words_df.sort_values("word").reset_index(drop=True)
-    group_num = st.selectbox("Select Group (1-13):", range(1, 14))
-    
-    words_per_group = len(df_sorted) // 13
+    words_per_group = len(words_df) // 13
     start_idx = (group_num - 1) * words_per_group
-    end_idx = start_idx + words_per_group if group_num < 13 else len(df_sorted)
+    end_idx = start_idx + words_per_group if group_num < 13 else len(words_df)
+    current_group_df = words_df.iloc[start_idx:end_idx]
     
-    group_df = df_sorted.iloc[start_idx:end_idx]
-    
-    for _, row in group_df.iterrows():
-        with st.expander(f"Word: {mask_vowels(row['word'])}"):
-            st.write(f"**Full Word:** {row['word']}")
-            if row['definition']:
-                st.write(f"*Definition:* {row['definition']}")
-            if st.button(f"🔊 Listen", key=f"audio_{row['word']}"):
-                audio_learn = get_audio_bytes(row['word'])
-                st.audio(audio_learn, format="audio/mp3")
+    for _, row in current_group_df.iterrows():
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.write(f"**{mask_vowels(row['word'])}**")
+        with col2:
+            if st.button(f"Hear/See", key=f"btn_{row['word']}"):
+                st.write(f"Word: **{row['word']}**")
+                if row['definition']: st.write(f"_{row['definition']}_")
 
 # --- TAB 3: PERFORMANCE ---
 with tab_stats:
-    st.header("Your Progress")
+    st.header("Performance Stats")
     conn = get_db_connection()
-    try:
-        stats_df = pd.read_sql_query("SELECT date, correctly_spelled FROM scores", conn)
-        if not stats_df.empty:
-            stats_df["date"] = pd.to_datetime(stats_df["date"])
-            daily_performance = stats_df.groupby("date")["correctly_spelled"].mean() * 100
-            
-            st.subheader("Daily Accuracy (%)")
-            st.line_chart(daily_performance)
-            
-            st.subheader("Words to Review")
-            failed_words = conn.execute("""
-                SELECT word, COUNT(*) as fails FROM scores 
-                WHERE correctly_spelled = 0 GROUP BY word ORDER BY fails DESC LIMIT 5
-            """).fetchall()
-            for row in failed_words:
-                st.write(f"⚠️ **{row['word']}** (Failed {row['fails']} times)")
-        else:
-            st.info("No data yet. Complete some exams to see your stats!")
-    finally:
+    stats_df = pd.read_sql_query("SELECT date, correctly_spelled FROM scores", conn)
+    conn.close()
+
+    if not stats_df.empty:
+        stats_df["date"] = pd.to_datetime(stats_df["date"])
+        daily_avg = stats_df.groupby("date")["correctly_spelled"].mean() * 100
+        st.line_chart(daily_avg)
+        
+        st.subheader("Words to Review (Failed most)")
+        conn = get_db_connection()
+        incorrect = conn.execute("""
+            SELECT word, COUNT(*) as fails FROM scores 
+            WHERE correctly_spelled = 0 GROUP BY word ORDER BY fails DESC LIMIT 10
+        """).fetchall()
+        for row in incorrect:
+            st.write(f"🔴 {row['word']} (Failed {row['fails']} times)")
         conn.close()
+    else:
+        st.write("Start practicing to see your stats!")
