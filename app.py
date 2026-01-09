@@ -214,14 +214,55 @@ with tab_learn:
                 st.write(f"Word: **{row['word']}**")
                 if row['definition']: st.write(f"_{row['definition']}_")
 
+# --- TAB 3: PERFORMANCE / MY PROGRESS ---
 with tab_stats:
     st.header("Performance Stats")
+    
     conn = get_db_connection()
     try:
+        # 1. Trend Chart
         stats_df = pd.read_sql_query("SELECT date, correctly_spelled FROM scores", conn)
         if not stats_df.empty:
             stats_df["date"] = pd.to_datetime(stats_df["date"])
             daily_avg = stats_df.groupby("date")["correctly_spelled"].mean() * 100
+            st.subheader("Daily Accuracy Trend")
             st.line_chart(daily_avg)
+            
+            # 2. Detailed List of Incorrect Words
+            st.subheader("❌ Words Spelled Incorrectly")
+            incorrect_words_df = pd.read_sql_query("""
+                SELECT word, COUNT(*) as mistakes, MAX(date) as last_attempt 
+                FROM scores 
+                WHERE correctly_spelled = 0 
+                GROUP BY word 
+                ORDER BY mistakes DESC
+            """, conn)
+
+            if not incorrect_words_df.empty:
+                st.dataframe(incorrect_words_df, use_container_width=True)
+            else:
+                st.success("Great job! No incorrect words in your history.")
+
+            # 3. RESET BUTTON LOGIC
+            st.divider()
+            st.subheader("Danger Zone")
+            st.warning("Resetting will delete your entire score history and the list of incorrect words.")
+            
+            # Confirmation Checkbox
+            confirm_reset = st.checkbox("I want to permanently delete my progress.")
+            
+            if st.button("Reset All Progress", disabled=not confirm_reset):
+                conn_reset = get_db_connection()
+                # Clear both tables
+                conn_reset.execute("DELETE FROM scores")
+                conn_reset.execute("DELETE FROM daily_exam_progress")
+                conn_reset.commit()
+                conn_reset.close()
+                st.success("Data reset successfully! Refreshing...")
+                st.rerun()
+
+        else:
+            st.info("Start practicing to see your stats!")
     finally:
         conn.close()
+
