@@ -180,10 +180,29 @@ with tab_exam:
     else:
         st.info("No words found for this mode. Try another group!")
 
-# --- TAB 2: LEARN (Omitted for brevity, keep your current code) ---
+# --- TAB 2: ALPHABETICAL LEARN ---
 with tab_learn:
-    st.header("Alphabetical Groups")
-    # ... your existing learning code ...
+    st.header("Learning Groups")
+    st.write("Words are split into 13 alphabetical groups (~33 words each).")
+    
+    # Sort and Group Logic
+    df_sorted = words_df.sort_values("word").reset_index(drop=True)
+    group_num = st.selectbox("Select Group (1-13):", range(1, 14))
+    
+    words_per_group = len(df_sorted) // 13
+    start_idx = (group_num - 1) * words_per_group
+    end_idx = start_idx + words_per_group if group_num < 13 else len(df_sorted)
+    
+    group_df = df_sorted.iloc[start_idx:end_idx]
+    
+    for _, row in group_df.iterrows():
+        with st.expander(f"Word: {mask_vowels(row['word'])}"):
+            st.write(f"**Full Word:** {row['word']}")
+            if row['definition']:
+                st.write(f"*Definition:* {row['definition']}")
+            if st.button(f"🔊 Listen", key=f"audio_{row['word']}"):
+                audio_learn = get_audio_bytes(row['word'])
+                st.audio(audio_learn, format="audio/mp3")
 
 # --- TAB 3: MY PROGRESS ---
 with tab_stats:
@@ -220,6 +239,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
