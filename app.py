@@ -9,10 +9,6 @@ from gtts import gTTS
 
 # --- CONFIGURATION & PAGE SETUP ---
 st.set_page_config(page_title="Spelling Bee 2026", page_icon="🐝", layout="centered")
-# --- ENCOURAGEMENT HEADER ---
-st.markdown("""
-
-""", unsafe_allow_input=True)
 
 DB_PATH = "scores.db"
 DATA_FILE = "Spelling bee 2026.xlsx"
@@ -212,5 +208,6 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
