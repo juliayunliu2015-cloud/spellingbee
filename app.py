@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+# from flask import Flask, render_template, request, redirect, url_for, session
 import os
 import random
 import sqlite3
@@ -7,7 +7,7 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 from gtts import gTTS
 
-app = Flask(__name__)
+# app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 
 # Path to the Excel file in the project root
@@ -706,3 +706,4 @@ def incorrect_words():
 if __name__ == "__main__":
     # For local development
     app.run(debug=True)
+
