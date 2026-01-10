@@ -63,7 +63,7 @@ DATA_FILE = "Spelling bee 2026.xlsx"
 DAILY_EXAM_GOAL = 33
 
 def init_db():
-    """Initializes the database using a secure context manager to prevent locks."""
+    """Initializes the database using a secure context manager."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scores (
@@ -140,7 +140,7 @@ with tab_exam:
 
         word_to_spell = st.session_state.current_word["word"]
         
-        # Audio Interaction (Hidden Player triggered by buttons)
+        # Audio Interaction (Hidden Player)
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("🪄 CAST SPELL (Hear Word)"):
@@ -153,7 +153,7 @@ with tab_exam:
             audio_io = io.BytesIO()
             gTTS(text=str(word_to_spell), lang="en").write_to_fp(audio_io)
             st.audio(audio_io, format="audio/mp3", autoplay=True)
-            st.session_state.play_trigger = False # Reset trigger
+            st.session_state.play_trigger = False
 
         # Form Logic for Spelling Submission
         with st.form(key="spell_form", clear_on_submit=True):
@@ -162,11 +162,12 @@ with tab_exam:
                 is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
                 today_str = date.today().isoformat()
                 
-                # Transactional database update to prevent ProgrammingError
+                # FIXED: Corrected parameter count here
                 with sqlite3.connect(DB_PATH) as conn:
+                    # We use 4 placeholders (?,?,?,?) for 4 values
                     conn.execute("""
                         INSERT INTO scores (date, word, correctly_spelled, attempts) 
-                        VALUES (?, ?, ?, 1)
+                        VALUES (?, ?, ?, ?)
                     """, (today_str, word_to_spell, int(is_correct), 1))
                     
                     if is_correct:
