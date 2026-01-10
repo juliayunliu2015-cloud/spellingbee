@@ -55,26 +55,24 @@ def init_db():
 @st.cache_data
 def load_words():
     if not os.path.exists(DATA_FILE):
-        return pd.DataFrame(columns=["word", "definition", "sentence"])
+        return pd.DataFrame(columns=["word", "definition"])
     try:
         df = pd.read_excel(DATA_FILE)
         # Identify columns
         word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling"]), df.columns[0])
         def_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["def", "meaning", "desc"])), None)
-        sent_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["sentence", "example", "sample"])), None)
         
         clean_rows = []
         for _, row in df.iterrows():
             if pd.isna(row[word_col]): continue
             clean_rows.append({
                 "word": str(row[word_col]).strip(),
-                "definition": str(row[def_col]).strip() if def_col and not pd.isna(row[def_col]) else "No definition available.",
-                "sentence": str(row[sent_col]).strip() if sent_col and not pd.isna(row[sent_col]) else "No sample sentence available."
+                "definition": str(row[def_col]).strip() if def_col and not pd.isna(row[def_col]) else "No definition available."
             })
         # Sort A-Z immediately for the Learn Tab
         return pd.DataFrame(clean_rows).sort_values("word").reset_index(drop=True)
     except:
-        return pd.DataFrame(columns=["word", "definition", "sentence"])
+        return pd.DataFrame(columns=["word", "definition"])
 
 def mask_vowels(word):
     return "".join("_" if char.lower() in "aeiou" else char for char in word)
@@ -160,8 +158,7 @@ with tab_exam:
                 
                 st.session_state.last_result = {
                     "is_correct": is_correct, "word": word_to_spell,
-                    "definition": st.session_state.current_word["definition"],
-                    "sentence": st.session_state.current_word["sentence"]
+                    "definition": st.session_state.current_word["definition"]
                 }
 
                 if is_correct:
@@ -181,7 +178,7 @@ with tab_exam:
                 st.error("❌ Incorrect")
                 st.subheader(f"Correct Spelling: :green[{res['word']}]")
                 st.write(f"**Meaning:** {res['definition']}")
-                st.write(f"**Sentence:** _{res['sentence']}_")
+       
             if st.button("Next Word"):
                 st.session_state.last_result = None
                 st.rerun()
@@ -207,7 +204,7 @@ with tab_learn:
         with st.expander(f"Word {idx+1}: {mask_vowels(row['word'])}"):
             st.subheader(f"Full Spelling: :blue[{row['word']}]")
             st.write(f"**Definition:** {row['definition']}")
-            st.write(f"**Example:** _{row['sentence']}_")
+            
             
             # Button to hear the word
             if st.button(f"🔊 Listen to {mask_vowels(row['word'])}", key=f"audio_btn_{idx}"):
@@ -248,6 +245,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
