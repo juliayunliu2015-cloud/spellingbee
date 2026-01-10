@@ -185,7 +185,17 @@ with tab_exam:
     else:
         st.info("No words found in this mode.")
 
-# --- TAB 2: ALPHABETICAL LEARN (CLEAN ROW VERSION) ---
+# --- 1. ADD THIS TO YOUR CSS SECTION AT THE TOP ---
+st.markdown("""
+    <style>
+        /* Hides the gray audio player bar so only the button is visible */
+        div[data-testid="stAudio"] {
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 2. MODIFIED TAB 2 CODE ---
 with tab_learn:
     st.header("📖 Alphabetical Study Groups")
     
@@ -200,25 +210,26 @@ with tab_learn:
     
     st.divider()
 
-    # Display words: 1 per row
+    # Display words: 1 word per row
     for idx, row in current_group.iterrows():
-        # Using columns to put the Word + Definition on the left, and Audio on the right
+        # Setup columns: Text on the left, Button on the right
         col_text, col_audio = st.columns([3, 1])
         
         word_to_read = str(row['word']).replace('.0', '').strip()
 
         with col_text:
-            # Display just the word and definition
+            # Displays the Word as a header and the meaning underneath
             st.markdown(f"### {word_to_read}")
             st.write(f"**Meaning:** {row['definition']}")
         
         with col_audio:
-            # "Listen" button that triggers the sound
-            # Note: We use the key to keep each button unique
-            if st.button(f"🔊 Listen", key=f"btn_study_{idx}"):
+            # The button is mapped to the specific word
+            if st.button(f"🔊 Listen", key=f"study_btn_{idx}"):
+                # Generate the sound for this specific word
                 audio_io_learn = io.BytesIO()
                 gTTS(text=word_to_read, lang="en").write_to_fp(audio_io_learn)
-                # We use autoplay=True so it plays the moment the button is clicked
+                
+                # Autoplay=True makes it play the moment the button is clicked
                 st.audio(audio_io_learn, format="audio/mp3", autoplay=True)
         
         st.divider()
@@ -256,6 +267,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
