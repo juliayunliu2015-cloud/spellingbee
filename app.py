@@ -27,7 +27,7 @@ st.markdown("""
             border: 2px solid #c084fc !important; border-radius: 0.75rem !important;
             font-weight: 800 !important; font-size: 1.1rem !important; padding: 0.8rem !important; width: 100%;
         }
-        h1, h2, h3, p, label, span, div { color: #FFFFFF !important; }
+        h1, h2, h3, p, label, span { color: #FFFFFF !important; }
         div[data-testid="stAudio"] { display: none; }
         
         .study-card {
@@ -219,3 +219,4 @@ with tab_stats:
                 st.success("History has been successfully cleared!")
                 st.rerun()
         else: st.success("Perfect score so far! ✨")
+
