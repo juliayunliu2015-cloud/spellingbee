@@ -47,9 +47,9 @@ DATA_FILE = "Spelling bee 2026.xlsx"
 GOAL = 33
 
 def init_db():
-    """Initializes the database. Removed UNIQUE constraints to prevent IntegrityError."""
+    """Initializes the database without any UNIQUE constraints to avoid IntegrityError."""
     with sqlite3.connect(DB_PATH) as conn:
-        # scores table stores every attempt (no unique constraints)
+        # We create a simple table that allows multiple attempts for the same word/date
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -73,7 +73,7 @@ def load_words():
 
 def get_incorrect_words():
     with sqlite3.connect(DB_PATH) as conn:
-        # A word is 'incorrect' if the most recent entry for it is a failure
+        # A word is counted as incorrect if its LATEST attempt was a failure
         cursor = conn.execute("""
             SELECT word FROM (
                 SELECT word, correctly_spelled, MAX(id) FROM scores GROUP BY word
@@ -83,7 +83,7 @@ def get_incorrect_words():
 
 def get_today_count():
     with sqlite3.connect(DB_PATH) as conn:
-        # Count unique words spelled correctly today
+        # Count unique words successfully spelled today
         cursor = conn.execute("SELECT COUNT(DISTINCT word) FROM scores WHERE date = ? AND correctly_spelled = 1", (date.today().isoformat(),))
         return cursor.fetchone()[0]
 
@@ -145,15 +145,12 @@ with tab_exam:
         with st.form(key="spell_form", clear_on_submit=True):
             user_input = st.text_input("Type the word you hear:", placeholder="Spell here...")
             if st.form_submit_button("SUBMIT"):
-                if not user_input.strip():
-                    st.warning("Please type something before submitting!")
-                else:
-                    is_correct = user_input.strip().lower() == str(curr["word"]).strip().lower()
-                    with sqlite3.connect(DB_PATH) as conn:
-                        conn.execute("INSERT INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
-                                     (date.today().isoformat(), curr["word"], int(is_correct)))
-                    st.session_state.last_result = {"correct": is_correct, "word": curr["word"], "definition": curr["definition"], "sentence": curr["sentence"]}
-                    st.rerun()
+                is_correct = user_input.strip().lower() == str(curr["word"]).strip().lower()
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("INSERT INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
+                                 (date.today().isoformat(), curr["word"], int(is_correct)))
+                st.session_state.last_result = {"correct": is_correct, "word": curr["word"], "definition": curr["definition"], "sentence": curr["sentence"]}
+                st.rerun()
 
         if st.session_state.last_result:
             res = st.session_state.last_result
@@ -162,7 +159,7 @@ with tab_exam:
             st.markdown(f"""<div class="study-card"><strong>📖 Meaning:</strong> {res['definition']}<br><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></div>""", unsafe_allow_html=True)
     else: st.info("No words found in this group!")
 
-# --- TAB 2: STUDY ROOM ---
+# --- TAB 2: STUDY ROOM (3 Per Row, Click Word to Play) ---
 with tab_learn:
     study_group = st.selectbox("Select Group to Study:", group_options, key="study_select")
     
@@ -178,6 +175,7 @@ with tab_learn:
         cols = st.columns(3)
         for i, (idx, row) in enumerate(row_data.iterrows()):
             with cols[i]:
+                # The word is the button
                 if st.button(f"🔊 {row['word']}", key=f"s_btn_{idx}"):
                     audio_io_s = io.BytesIO()
                     gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_s)
@@ -190,7 +188,7 @@ with tab_learn:
                     </div>
                 """, unsafe_allow_html=True)
 
-# --- TAB 3: PROGRESS ---
+# --- TAB 3: PROGRESS (With Danger Zone Reset) ---
 with tab_stats:
     st.header("📊 My Progress")
     with sqlite3.connect(DB_PATH) as conn:
@@ -205,13 +203,3 @@ with tab_stats:
         if not bad_df.empty:
             st.subheader("❌ Words to Review")
             st.dataframe(bad_df, use_container_width=True, hide_index=True)
-            
-            st.divider()
-            st.subheader("⚠️ Danger Zone")
-            confirm_reset = st.checkbox("I understand resetting deletes all history.")
-            if st.button("RESET INCORRECT WORD LIST", disabled=not confirm_reset):
-                with sqlite3.connect(DB_PATH) as conn:
-                    conn.execute("DELETE FROM scores")
-                st.success("History cleared!")
-                st.rerun()
-        else: st.success("Perfect score so far! ✨")
