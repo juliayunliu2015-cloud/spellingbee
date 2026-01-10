@@ -185,32 +185,34 @@ with tab_exam:
     else:
         st.info("No words found in this mode.")
 
-# --- TAB 2: ALPHABETICAL LEARN (FIXED) ---
+# --- TAB 2: SPELLBOOK (Updated to Grid, No Accordion, Direct Word Buttons) ---
 with tab_learn:
-    st.header("📖 Alphabetical Study Groups")
-    st.write("Words are sorted A-Z and split into 13 equal groups.")
+    st.subheader("📚 Alphabetical Spellbook")
     
-    group_num = st.selectbox("Select Learning Group (1-13):", range(1, 14), key="learn_group_choice")
+    # Optional search/filter for the spellbook
+    search = st.text_input("Search for a word:", placeholder="Type to filter...")
+    filtered_df = words_df[words_df['word'].str.contains(search, case=False)] if search else words_df
     
-    # Calculate group slice
-    words_per_group = max(1, len(words_df) // 13)
-    start_idx = (group_num - 1) * words_per_group
-    end_idx = start_idx + words_per_group if group_num < 13 else len(words_df)
-    
-    current_group = words_df.iloc[start_idx:end_idx]
-    
-    # Display words in an organized way
-    for idx, row in current_group.iterrows():
-        with st.expander(f"Word {idx+1}: {mask_vowels(row['word'])}"):
-            st.subheader(f"Full Spelling: :blue[{row['word']}]")
-            st.write(f"**Definition:** {row['definition']}")
-            
-            
-            # Button to hear the word
-            if st.button(f"🔊 Listen to {mask_vowels(row['word'])}", key=f"audio_btn_{idx}"):
-                audio_io_learn = io.BytesIO()
-                gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_learn)
-                st.audio(audio_io_learn, format="audio/mp3")
+    # Grid Layout (3 words per row)
+    for i in range(0, len(filtered_df), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j < len(filtered_df):
+                row = filtered_df.iloc[i + j]
+                with cols[j]:
+                    # The button text is the actual word
+                    if st.button(f"🔊 {row['word']}", key=f"study_{i+j}"):
+                        tts = gTTS(text=str(row['word']), lang='en')
+                        audio_io_s = io.BytesIO()
+                        tts.write_to_fp(audio_io_s)
+                        st.audio(audio_io_s, format="audio/mp3", autoplay=True)
+                    
+                    st.markdown(f"""
+                        <div class="anime-card">
+                            <small><b>Meaning:</b> {row['definition']}</small><br>
+                            <small><i>"{row['sentence']}"</i></small>
+                        </div>
+                    """, unsafe_allow_html=True)
 
 # --- TAB 3: MY PROGRESS ---
 with tab_stats:
@@ -245,6 +247,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
