@@ -47,17 +47,13 @@ DATA_FILE = "Spelling bee 2026.xlsx"
 GOAL = 33
 
 def init_db():
-    """Initializes the database and fixes IntegrityErrors by removing old constraints."""
     with sqlite3.connect(DB_PATH) as conn:
-        # Check if table exists
-        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scores'")
-        if cursor.fetchone():
-            # Check if it has the restrictive UNIQUE index from previous versions
-            indices = conn.execute("PRAGMA index_list('scores')").fetchall()
-            if indices:
-                # If old indices exist, drop and recreate to ensure no crashes
-                conn.execute("DROP TABLE scores")
-        
+        # Check if table has old UNIQUE constraints causing the crash
+        cursor = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='scores'")
+        row = cursor.fetchone()
+        if row and "UNIQUE" in row[0].upper():
+            conn.execute("DROP TABLE scores")
+            
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -81,6 +77,7 @@ def load_words():
 
 def get_incorrect_words():
     with sqlite3.connect(DB_PATH) as conn:
+        # Returns words where the most recent attempt was incorrect
         cursor = conn.execute("""
             SELECT word FROM (
                 SELECT word, correctly_spelled, MAX(id) FROM scores GROUP BY word
@@ -96,7 +93,6 @@ def get_today_count():
 init_db()
 words_df = load_words()
 
-# Session States
 if "current_word" not in st.session_state: st.session_state.current_word = None
 if "last_result" not in st.session_state: st.session_state.last_result = None
 if "play_trigger" not in st.session_state: st.session_state.play_trigger = False
@@ -121,7 +117,8 @@ with tab_exam:
     if exam_group == "All Words": 
         available_words = words_df
     elif exam_group == "❌ Incorrect Words Only":
-        available_words = words_df[words_df['word'].isin(get_incorrect_words())]
+        inc_list = get_incorrect_words()
+        available_words = words_df[words_df['word'].isin(inc_list)]
     else:
         words_per_group = max(1, len(words_df) // 13)
         available_words = words_df.iloc[(exam_group-1)*words_per_group : exam_group*words_per_group]
@@ -153,8 +150,7 @@ with tab_exam:
             if st.form_submit_button("SUBMIT"):
                 is_correct = user_input.strip().lower() == str(curr["word"]).strip().lower()
                 with sqlite3.connect(DB_PATH) as conn:
-                    # 'OR IGNORE' is a safety fallback for database integrity
-                    conn.execute("INSERT OR IGNORE INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
+                    conn.execute("INSERT INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
                                  (date.today().isoformat(), curr["word"], int(is_correct)))
                 st.session_state.last_result = {"correct": is_correct, "word": curr["word"], "definition": curr["definition"], "sentence": curr["sentence"]}
                 st.rerun()
@@ -166,7 +162,7 @@ with tab_exam:
             st.markdown(f"""<div class="study-card"><strong>📖 Meaning:</strong> {res['definition']}<br><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></div>""", unsafe_allow_html=True)
     else: st.info("No words found in this group!")
 
-# --- TAB 2: STUDY ROOM (3 Per Row, Word as Button) ---
+# --- TAB 2: STUDY ROOM ---
 with tab_learn:
     study_group = st.selectbox("Select Group to Study:", group_options, key="study_select")
     
@@ -194,20 +190,21 @@ with tab_learn:
                     </div>
                 """, unsafe_allow_html=True)
 
-# --- TAB 3: PROGRESS (With Danger Click Reminder) ---
+# --- TAB 3: PROGRESS (Updated Logic) ---
 with tab_stats:
     st.header("📊 My Progress")
     with sqlite3.connect(DB_PATH) as conn:
+        # Show all words that have been missed at least once
         bad_df = pd.read_sql_query("""
-            SELECT word as 'Word', COUNT(*) as 'Mistakes' 
+            SELECT word as 'Word', COUNT(*) as 'Total Mistakes' 
             FROM scores 
             WHERE correctly_spelled = 0 
             GROUP BY word 
-            ORDER BY Mistakes DESC
+            ORDER BY COUNT(*) DESC
         """, conn)
         
         if not bad_df.empty:
-            st.subheader("❌ Words to Review")
+            st.subheader("❌ Words Missed")
             st.dataframe(bad_df, use_container_width=True, hide_index=True)
             
             st.divider()
@@ -218,5 +215,4 @@ with tab_stats:
                     conn.execute("DELETE FROM scores")
                 st.success("History has been successfully cleared!")
                 st.rerun()
-        else: st.success("Perfect score so far! ✨")
-
+        else: st.success("Perfect score so far! Vivian, you are doing a magical job! ✨")
