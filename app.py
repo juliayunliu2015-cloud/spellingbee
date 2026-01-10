@@ -2,163 +2,249 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import os
+import random
 import io
 from datetime import date
 from gtts import gTTS
 
-# --- 1. DARK PURPLE ANIME STYLESHEET ---
-st.set_page_config(page_title="Vivian's Spelling Quest", page_icon="🔮", layout="wide")
+# --- CONFIGURATION & PAGE SETUP ---
+st.set_page_config(page_title="Spelling Bee 2026", page_icon="🐝", layout="centered")
 
+# --- ENCOURAGEMENT HEADER ---
 st.markdown("""
-    <style>
-        .stApp { background: linear-gradient(135deg, #0d001a 0%, #1b0033 100%); color: #dcbfff; }
-        .anime-header {
-            background: linear-gradient(90deg, #4b0082, #8a2be2);
-            padding: 2rem; border-radius: 0 0 30px 30px; border-bottom: 4px solid #ff00ff;
-            text-align: center; box-shadow: 0 0 20px rgba(255, 0, 255, 0.3); margin-bottom: 2rem;
-        }
-        .anime-header h1 { color: #ffffff !important; text-shadow: 2px 2px #ff00ff; font-weight: 900; }
-        div.stButton > button {
-            background: linear-gradient(45deg, #4b0082, #9400d3) !important;
-            border: 2px solid #ff00ff !important; color: white !important;
-            border-radius: 12px !important; font-weight: 800 !important;
-        }
-        .anime-card {
-            background: rgba(20, 0, 40, 0.8); border: 2px solid #8a2be2;
-            border-radius: 15px; padding: 20px; border-left: 8px solid #ff00ff;
-        }
-        .stTextInput input { background-color: #1a0033 !important; border: 2px solid #8a2be2 !important; color: #00ffcc !important; text-align: center; }
-    </style>
+    <div style="background-color:#FFD700; padding:20px; border-radius:15px; text-align:center; margin-bottom:25px; border: 2px solid #DAA520;">
+        <h1 style="color:#000; margin:0; font-family: 'Arial Black', sans-serif;">🏆 GO FOR THE GOLD, VIVIAN! 🏆</h1>
+        <p style="color:#333; font-size:1.2rem; font-weight:bold; margin:10px 0 0 0;">
+            "Every word you master today is a step closer to the 2026 Trophy! 🐝✨"
+        </p>
+    </div>
 """, unsafe_allow_html=True)
 
-# --- 2. DATA & FUNCTIONAL LOGIC ---
 DB_PATH = "scores.db"
 DATA_FILE = "Spelling bee 2026.xlsx"
-GOAL = 33
+DAILY_EXAM_GOAL = 33
+
+# --- DATABASE FUNCTIONS ---
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS scores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                date TEXT, 
-                word TEXT, 
-                correctly_spelled INTEGER
-            )
-        """)
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS scores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            word TEXT NOT NULL,
+            correctly_spelled INTEGER NOT NULL,
+            attempts INTEGER NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS daily_exam_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL UNIQUE,
+            correct_count INTEGER DEFAULT 0,
+            total_attempted INTEGER DEFAULT 0
+        )
+    """)
+    conn.commit()
+    conn.close()
 
+@st.cache_data
 def load_words():
     if not os.path.exists(DATA_FILE):
         return pd.DataFrame(columns=["word", "definition", "sentence"])
     try:
         df = pd.read_excel(DATA_FILE)
+        # Identify columns
+        word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling"]), df.columns[0])
+        def_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["def", "meaning", "desc"])), None)
+        sent_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["sentence", "example", "sample"])), None)
+        
         clean_rows = []
         for _, row in df.iterrows():
-            # CHANGE HERE: We assume Col 0 is ID, Col 1 is Word, Col 2 is Def, Col 3 is Sentence
-            # If your Excel has NO ID column, change these back to 0, 1, 2
-            word_val = str(row.iloc[1]).strip() 
-            if word_val.lower() != "nan" and not word_val.isdigit():
-                clean_rows.append({
-                    "word": word_val,
-                    "definition": str(row.iloc[2]).strip() if len(row) > 2 else "...",
-                    "sentence": str(row.iloc[3]).strip() if len(row) > 3 else ""
-                })
-        return pd.DataFrame(clean_rows)
+            if pd.isna(row[word_col]): continue
+            clean_rows.append({
+                "word": str(row[word_col]).strip(),
+                "definition": str(row[def_col]).strip() if def_col and not pd.isna(row[def_col]) else "No definition available.",
+                "sentence": str(row[sent_col]).strip() if sent_col and not pd.isna(row[sent_col]) else "No sample sentence available."
+            })
+        # Sort A-Z immediately for the Learn Tab
+        return pd.DataFrame(clean_rows).sort_values("word").reset_index(drop=True)
     except:
         return pd.DataFrame(columns=["word", "definition", "sentence"])
 
-def get_mistakes():
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("""
-            SELECT word FROM (
-                SELECT word, correctly_spelled, MAX(id) FROM scores GROUP BY word
-            ) WHERE correctly_spelled = 0
-        """)
-        return [row[0] for row in cursor.fetchall()]
+def mask_vowels(word):
+    return "".join("_" if char.lower() in "aeiou" else char for char in word)
 
-def get_today_count():
-    with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("SELECT COUNT(DISTINCT word) FROM scores WHERE date = ? AND correctly_spelled = 1", (date.today().isoformat(),))
-        return cursor.fetchone()[0]
-
+# --- APP INITIALIZATION ---
 init_db()
 words_df = load_words()
 
-# --- 3. SESSION STATE ---
-if "current_word" not in st.session_state: st.session_state.current_word = None
-if "last_result" not in st.session_state: st.session_state.last_result = None
+# Session State Initialization
+if "current_word" not in st.session_state:
+    st.session_state.current_word = None
+if "attempts" not in st.session_state:
+    st.session_state.attempts = 0
+if "last_result" not in st.session_state:
+    st.session_state.last_result = None
+if "exam_mode" not in st.session_state:
+    st.session_state.exam_mode = "All Words"
 
-# --- UI ---
-st.markdown('<div class="anime-header"><h1>🔮 VIVIAN\'S SPELLING QUEST</h1></div>', unsafe_allow_html=True)
+# --- UI TABS ---
+tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Alphabetical Learn", "📊 My Progress"])
 
-tab_exam, tab_learn, tab_stats = st.tabs(["🏹 THE QUEST", "📖 SPELLBOOK", "📊 POWER LEVEL"])
-
+# --- TAB 1: DAILY EXAM ---
 with tab_exam:
-    today_score = get_today_count()
-    st.metric("WORDS CONQUERED", f"{today_score} / {GOAL}")
-
-    group_options = ["All Words", "❌ Mistake Review"] + [f"Group {i}" for i in range(1, 14)]
-    selection = st.selectbox("Quest Difficulty:", group_options)
-
-    if selection == "All Words": pool = words_df
-    elif selection == "❌ Mistake Review": pool = words_df[words_df['word'].isin(get_mistakes())]
-    else:
-        num = int(selection.split()[-1])
-        size = len(words_df) // 13
-        pool = words_df.iloc[(num-1)*size : num*size]
-
-    if not pool.empty:
-        if st.session_state.current_word is None or st.session_state.current_word["word"] not in pool["word"].values:
-            st.session_state.current_word = pool.sample(1).iloc[0]
-
-        curr = st.session_state.current_word
+    st.header("Daily Challenge")
+    
+    modes = ["All Words", "❌ Incorrect Words Only"] + list(range(1, 14))
+    
+    # Selection logic
+    if st.session_state.exam_mode not in modes:
+        st.session_state.exam_mode = "All Words"
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔊 SUMMON SOUND"):
-                # Clean word to ensure gTTS reads text only
-                clean_text = str(curr['word']).replace('.0', '')
-                tts = gTTS(text=clean_text, lang='en')
-                audio_io = io.BytesIO()
-                tts.write_to_fp(audio_io)
-                st.audio(audio_io, format="audio/mp3", autoplay=True)
-        with col2:
-            if st.button("⏭️ SEEK NEW WORD"):
-                st.session_state.current_word = pool.sample(1).iloc[0]
-                st.session_state.last_result = None
-                st.rerun()
+    exam_group = st.selectbox(
+        "Select Exam Group or Practice Mode:",
+        options=modes,
+        index=modes.index(st.session_state.exam_mode),
+        key="exam_mode_selector"
+    )
+    st.session_state.exam_mode = exam_group
+
+    # Filter Logic
+    if exam_group == "All Words":
+        available_words = words_df
+    elif exam_group == "❌ Incorrect Words Only":
+        conn = get_db_connection()
+        bad_list = [row['word'] for row in conn.execute("SELECT DISTINCT word FROM scores WHERE correctly_spelled = 0").fetchall()]
+        conn.close()
+        available_words = words_df[words_df['word'].isin(bad_list)]
+    else:
+        words_per_group = max(1, len(words_df) // 13)
+        start_idx = (exam_group - 1) * words_per_group
+        end_idx = start_idx + words_per_group if exam_group < 13 else len(words_df)
+        available_words = words_df.iloc[start_idx:end_idx]
+
+    if not available_words.empty:
+        if st.session_state.current_word is None or st.session_state.current_word["word"] not in available_words["word"].values:
+            st.session_state.current_word = available_words.sample(1).iloc[0]
+            st.session_state.attempts = 0
+
+        # Progress Bar
+        conn = get_db_connection()
+        today_date = date.today().isoformat()
+        row = conn.execute("SELECT correct_count FROM daily_exam_progress WHERE date = ?", (today_date,)).fetchone()
+        score_today = row[0] if row else 0
+        conn.close()
+        st.progress(min(score_today / DAILY_EXAM_GOAL, 1.0))
+        st.write(f"Daily Progress: **{score_today} / {DAILY_EXAM_GOAL}**")
+
+        # Audio
+        word_to_spell = st.session_state.current_word["word"]
+        audio_io = io.BytesIO()
+        gTTS(text=str(word_to_spell), lang="en").write_to_fp(audio_io)
+        st.audio(audio_io, format="audio/mp3")
 
         with st.form(key="spell_form", clear_on_submit=True):
-            user_input = st.text_input("Type the word precisely:")
-            if st.form_submit_button("🔥 CAST SPELL"):
-                is_correct = user_input.strip().lower() == str(curr['word']).strip().lower()
-                with sqlite3.connect(DB_PATH) as conn:
-                    conn.execute("INSERT INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
-                                 (date.today().isoformat(), curr["word"], int(is_correct)))
-                st.session_state.last_result = {"correct": is_correct, "word": curr["word"], "def": curr["definition"], "sent": curr["sentence"]}
+            user_input = st.text_input("Type the word:")
+            if st.form_submit_button("Check"):
+                st.session_state.attempts += 1
+                is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
+                
+                conn = get_db_connection()
+                conn.execute("INSERT INTO scores (date, word, correctly_spelled, attempts) VALUES (?, ?, ?, ?)",
+                             (today_date, word_to_spell, int(is_correct), st.session_state.attempts))
+                
+                st.session_state.last_result = {
+                    "is_correct": is_correct, "word": word_to_spell,
+                    "definition": st.session_state.current_word["definition"],
+                    "sentence": st.session_state.current_word["sentence"]
+                }
+
+                if is_correct:
+                    conn.execute("INSERT INTO daily_exam_progress (date, correct_count, total_attempted) VALUES (?, 1, 1) ON CONFLICT(date) DO UPDATE SET correct_count = correct_count + 1, total_attempted = total_attempted + 1", (today_date,))
+                    st.session_state.current_word = available_words.sample(1).iloc[0]
+                    st.session_state.attempts = 0
+                else:
+                    conn.execute("INSERT INTO daily_exam_progress (date, total_attempted) VALUES (?, 1) ON CONFLICT(date) DO UPDATE SET total_attempted = total_attempted + 1", (today_date,))
+                conn.commit()
+                conn.close()
                 st.rerun()
 
         if st.session_state.last_result:
             res = st.session_state.last_result
-            if res["correct"]: st.success("✅ PERFECT CAST!")
-            else: st.error(f"❌ FAILED! Correct spelling: {res['word']}")
-            st.markdown(f'<div class="anime-card"><b>Meaning:</b> {res["def"]}<br><i>"{res["sent"]}"</i></div>', unsafe_allow_html=True)
+            if res["is_correct"]: st.success("✅ Correct!")
+            else:
+                st.error("❌ Incorrect")
+                st.subheader(f"Correct Spelling: :green[{res['word']}]")
+                st.write(f"**Meaning:** {res['definition']}")
+                st.write(f"**Sentence:** _{res['sentence']}_")
+            if st.button("Next Word"):
+                st.session_state.last_result = None
+                st.rerun()
+    else:
+        st.info("No words found in this mode.")
 
+# --- TAB 2: ALPHABETICAL LEARN (FIXED) ---
 with tab_learn:
-    for i in range(0, len(words_df), 3):
-        cols = st.columns(3)
-        for j in range(3):
-            if i + j < len(words_df):
-                row = words_df.iloc[i + j]
-                with cols[j]:
-                    st.markdown(f'<div class="anime-card">✨ <b>{row["word"]}</b><br><small>{row["definition"]}</small></div>', unsafe_allow_html=True)
-                    if st.button(f"🔊 Listen", key=f"snd_{i+j}"):
-                        tts = gTTS(text=str(row['word']), lang='en')
-                        audio_io_s = io.BytesIO()
-                        tts.write_to_fp(audio_io_s)
-                        st.audio(audio_io_s, format="audio/mp3", autoplay=True)
+    st.header("📖 Alphabetical Study Groups")
+    st.write("Words are sorted A-Z and split into 13 equal groups.")
+    
+    group_num = st.selectbox("Select Learning Group (1-13):", range(1, 14), key="learn_group_choice")
+    
+    # Calculate group slice
+    words_per_group = max(1, len(words_df) // 13)
+    start_idx = (group_num - 1) * words_per_group
+    end_idx = start_idx + words_per_group if group_num < 13 else len(words_df)
+    
+    current_group = words_df.iloc[start_idx:end_idx]
+    
+    # Display words in an organized way
+    for idx, row in current_group.iterrows():
+        with st.expander(f"Word {idx+1}: {mask_vowels(row['word'])}"):
+            st.subheader(f"Full Spelling: :blue[{row['word']}]")
+            st.write(f"**Definition:** {row['definition']}")
+            st.write(f"**Example:** _{row['sentence']}_")
+            
+            # Button to hear the word
+            if st.button(f"🔊 Listen to {mask_vowels(row['word'])}", key=f"audio_btn_{idx}"):
+                audio_io_learn = io.BytesIO()
+                gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_learn)
+                st.audio(audio_io_learn, format="audio/mp3")
 
+# --- TAB 3: MY PROGRESS ---
 with tab_stats:
-    with sqlite3.connect(DB_PATH) as conn:
-        bad_df = pd.read_sql_query("SELECT word, COUNT(*) as Mistakes FROM scores WHERE correctly_spelled = 0 GROUP BY word ORDER BY Mistakes DESC", conn)
-    st.dataframe(bad_df, use_container_width=True)
+    st.header("📊 My Progress")
+    conn = get_db_connection()
+    try:
+        # Incorrect Words Table
+        st.subheader("❌ Words to Review")
+        bad_df = pd.read_sql_query("""
+            SELECT word, COUNT(*) as mistakes, MAX(date) as last_fail 
+            FROM scores WHERE correctly_spelled = 0 
+            GROUP BY word ORDER BY mistakes DESC
+        """, conn)
+
+        if not bad_df.empty:
+            st.dataframe(bad_df, use_container_width=True)
+            if st.button("🎯 Practice These Incorrect Words Now"):
+                st.session_state.exam_mode = "❌ Incorrect Words Only"
+                st.session_state.current_word = None
+                st.success("Practice mode updated! Switch to 'Daily Exam' to begin.")
+        else:
+            st.success("No mistakes yet! You're doing great, Vivian!")
+
+        # Reset Progress
+        st.divider()
+        st.subheader("🗑️ Reset All Data")
+        confirm = st.checkbox("I am sure I want to delete all my history.")
+        if st.button("Reset Everything", disabled=not confirm):
+            conn.execute("DELETE FROM scores")
+            conn.execute("DELETE FROM daily_exam_progress")
+            conn.commit()
+            st.rerun()
+    finally:
+        conn.close()
