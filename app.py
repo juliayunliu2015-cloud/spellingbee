@@ -185,11 +185,12 @@ with tab_exam:
     else:
         st.info("No words found in this mode.")
 
-# --- TAB 2: ALPHABETICAL LEARN (FIXED) ---
+# --- TAB 2: ALPHABETICAL LEARN (REMASTERED) ---
 with tab_learn:
     st.header("📖 Alphabetical Study Groups")
-    st.write("Words are sorted A-Z and split into 13 equal groups.")
+    st.write("Click any word button to hear it! Words are organized in a 3-column grid.")
     
+    # Selection for group
     group_num = st.selectbox("Select Learning Group (1-13):", range(1, 14), key="learn_group_choice")
     
     # Calculate group slice
@@ -197,20 +198,34 @@ with tab_learn:
     start_idx = (group_num - 1) * words_per_group
     end_idx = start_idx + words_per_group if group_num < 13 else len(words_df)
     
-    current_group = words_df.iloc[start_idx:end_idx]
-    
-    # Display words in an organized way
-    for idx, row in current_group.iterrows():
-        with st.expander(f"Word {idx+1}: {mask_vowels(row['word'])}"):
-            st.subheader(f"Full Spelling: :blue[{row['word']}]")
-            st.write(f"**Definition:** {row['definition']}")
-            
-            
-            # Button to hear the word
-            if st.button(f"🔊 Listen to {mask_vowels(row['word'])}", key=f"audio_btn_{idx}"):
-                audio_io_learn = io.BytesIO()
-                gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_learn)
-                st.audio(audio_io_learn, format="audio/mp3")
+    current_group = words_df.iloc[start_idx:end_idx].reset_index()
+
+    # Create the 3-column grid
+    for i in range(0, len(current_group), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j < len(current_group):
+                row = current_group.iloc[i + j]
+                with cols[j]:
+                    # Anime-style Card Container
+                    st.markdown(f"""
+                        <div class="anime-card">
+                            <p style="margin-bottom:10px; font-size:0.9rem;">
+                                <b>Meaning:</b> {row['definition']}
+                            </p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Button with the complete word
+                    # Key is unique to avoid streamlit duplicate errors
+                    if st.button(f"🔊 {row['word']}", key=f"audio_learn_{row['word']}_{i+j}"):
+                        audio_io_learn = io.BytesIO()
+                        # Clean word string just in case there are float leftovers (.0)
+                        word_to_read = str(row['word']).replace('.0', '')
+                        gTTS(text=word_to_read, lang="en").write_to_fp(audio_io_learn)
+                        
+                        # st.audio with autoplay=True and the CSS display:none hidden player
+                        st.audio(audio_io_learn, format="audio/mp3", autoplay=True)
 
 # --- TAB 3: MY PROGRESS ---
 with tab_stats:
@@ -245,6 +260,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
