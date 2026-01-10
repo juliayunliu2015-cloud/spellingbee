@@ -25,7 +25,7 @@ st.markdown("""
         /* Custom Magical Banner */
         .magical-banner {
             background-position:50% 70%; 
-            background: linear-gradient(135deg, #9d25f4 0%, #6d28d9 100%);
+            # background: linear-gradient(135deg, #9d25f4 0%, #6d28d9 100%);
             border-radius: 1rem;
             padding: 2.5rem;
             text-align: center;
@@ -282,6 +282,7 @@ with tab_stats:
             st.rerun()
     finally: conn.close()
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 
 
