@@ -92,22 +92,37 @@ def init_db():
 
 @st.cache_data
 def load_words():
-    """Loads and cleans the spelling list from Excel."""
+    """Loads and cleans the spelling list from Excel with SMART COLUMN DETECTION."""
     if not os.path.exists(DATA_FILE): 
         return pd.DataFrame(columns=["word", "definition", "sentence"])
     try:
         df = pd.read_excel(DATA_FILE)
+        
+        # --- FIXED: SMART COLUMN DETECTION ---
+        # 1. Find Word Column (looks for 'word', 'spelling', etc.)
         word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling"]), df.columns[0])
-        clean_rows = [
-            {
-                "word": str(row[word_col]).strip(), 
-                "definition": str(row.get("definition", "N/A")), 
-                "sentence": str(row.get("sentence", "N/A"))
-            } 
-            for _, row in df.iterrows() if not pd.isna(row[word_col])
-        ]
+        
+        # 2. Find Definition Column (looks for 'def', 'meaning', 'description')
+        def_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["def", "meaning", "desc"])), None)
+        
+        # 3. Find Sentence Column (looks for 'sentence', 'example', 'usage')
+        sent_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["sentence", "example", "sample", "usage"])), None)
+        
+        clean_rows = []
+        for _, row in df.iterrows():
+            if pd.isna(row[word_col]): continue
+            
+            # Extract data using the found column names
+            w = str(row[word_col]).strip()
+            d = str(row[def_col]).strip() if def_col and not pd.isna(row[def_col]) else "No definition available."
+            s = str(row[sent_col]).strip() if sent_col and not pd.isna(row[sent_col]) else "No sample sentence available."
+            
+            clean_rows.append({"word": w, "definition": d, "sentence": s})
+            
         return pd.DataFrame(clean_rows).sort_values("word").reset_index(drop=True)
-    except: 
+    except Exception as e:
+        # Fallback if file read fails completely
+        print(f"Error loading Excel: {e}")
         return pd.DataFrame(columns=["word", "definition", "sentence"])
 
 def mask_vowels(word):
@@ -132,7 +147,7 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# TABS: Added "Study Room" back
+# TABS
 tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Study Room", "📊 Progress"])
 
 # --- TAB 1: DAILY EXAM ---
