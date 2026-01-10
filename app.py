@@ -29,7 +29,15 @@ st.markdown("""
         }
         h1, h2, h3, p, label, span, div { color: #FFFFFF !important; }
         div[data-testid="stAudio"] { display: none; }
-        .streamlit-expanderHeader { background-color: #2d1b3d !important; color: white !important; border-radius: 10px; }
+        
+        /* Study Card Styling */
+        .study-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 5px solid #9d25f4;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 10px;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -40,7 +48,6 @@ DATA_FILE = "Spelling bee 2026.xlsx"
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS scores (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, word TEXT, correctly_spelled INTEGER, attempts INTEGER)")
-        conn.execute("CREATE TABLE IF NOT EXISTS daily_exam_progress (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT UNIQUE, correct_count INTEGER DEFAULT 0, total_attempted INTEGER DEFAULT 0)")
 
 @st.cache_data
 def load_words():
@@ -64,7 +71,6 @@ def load_words():
 
 def get_incorrect_words():
     with sqlite3.connect(DB_PATH) as conn:
-        # Fetches words where the most recent attempt or any attempt was a failure
         cursor = conn.execute("SELECT DISTINCT word FROM scores WHERE correctly_spelled = 0")
         return [row[0] for row in cursor.fetchall()]
 
@@ -78,13 +84,14 @@ if "play_trigger" not in st.session_state: st.session_state.play_trigger = False
 st.markdown('<div class="magical-banner"><h1>GO FOR THE GOLD, VIVIAN! 🏆</h1></div>', unsafe_allow_html=True)
 tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Study Room", "📊 Progress"])
 
+# Shared Group Selector Logic
+group_options = ["All Words", "❌ Incorrect Words Only"] + list(range(1, 14))
+
 # --- TAB 1: DAILY EXAM ---
 with tab_exam:
-    group_options = ["All Words", "❌ Incorrect Words Only"] + list(range(1, 14))
-    exam_group = st.selectbox("Select Study Group:", group_options)
+    exam_group = st.selectbox("Select Exam Group:", group_options)
     
-    if exam_group == "All Words": 
-        available_words = words_df
+    if exam_group == "All Words": available_words = words_df
     elif exam_group == "❌ Incorrect Words Only":
         inc_list = get_incorrect_words()
         available_words = words_df[words_df['word'].isin(inc_list)]
@@ -107,8 +114,7 @@ with tab_exam:
                     st.session_state.current_word = available_words.sample(1).iloc[0]
                     st.session_state.last_result = None
                     st.rerun()
-                else:
-                    st.session_state.play_trigger = True
+                else: st.session_state.play_trigger = True
         with col_b:
             if st.button("🔄 RE-PLAY"): st.session_state.play_trigger = True
 
@@ -129,43 +135,47 @@ with tab_exam:
 
         if st.session_state.last_result:
             res = st.session_state.last_result
-            if res["correct"]: st.balloons(); st.success(f"✨ Correct! It's {res['word']}.")
+            if res["correct"]: st.balloons(); st.success(f"✨ Correct!")
             else: st.error(f"❌ Incorrect. The word was: {res['word']}")
-            
-            st.markdown(f"""
-                <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px;">
-                    <p><strong>📖 Meaning:</strong> {res['definition']}</p>
-                    <p><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></p>
-                </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.info("No words found in this group yet!")
+            st.markdown(f"""<div class="study-card"><strong>📖 Meaning:</strong> {res['definition']}<br><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></div>""", unsafe_allow_html=True)
+    else: st.info("No words found in this group yet!")
 
-# --- TAB 2: STUDY ROOM ---
+# --- TAB 2: STUDY ROOM (NO ACCORDIONS) ---
 with tab_learn:
     st.header("📖 Alphabetical Study Room")
-    # Clean listing for study
-    for idx, row in words_df.head(100).iterrows():
-        with st.expander(f"{row['word']}"):
-            st.write(f"**Meaning:** {row['definition']}")
-            st.write(f"**Sentence:** {row['sentence']}")
+    study_group = st.selectbox("Select Group to Study:", group_options, key="study_room_select")
+    
+    if study_group == "All Words": study_list = words_df
+    elif study_group == "❌ Incorrect Words Only":
+        inc_list = get_incorrect_words()
+        study_list = words_df[words_df['word'].isin(inc_list)]
+    else:
+        words_per_group = max(1, len(words_df) // 13)
+        start_idx = (study_group - 1) * words_per_group
+        study_list = words_df.iloc[start_idx : start_idx + words_per_group]
 
-# --- TAB 3: PROGRESS (FIXED ERROR) ---
+    for idx, row in study_list.iterrows():
+        # Display as a Card for better visibility
+        st.markdown(f"""
+            <div class="study-card">
+                <h3 style="margin:0; color:#c084fc;">{row['word']}</h3>
+                <p style="margin:5px 0;"><strong>Meaning:</strong> {row['definition']}</p>
+                <p style="margin:5px 0;"><em>"{row['sentence']}"</em></p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Audio Button right below the card
+        if st.button(f"🔊 Listen to {row['word']}", key=f"study_btn_{idx}"):
+            audio_io_learn = io.BytesIO()
+            gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_learn)
+            st.audio(audio_io_learn, format="audio/mp3", autoplay=True)
+
+# --- TAB 3: PROGRESS ---
 with tab_stats:
     st.header("📊 My Progress")
     with sqlite3.connect(DB_PATH) as conn:
-        # Fixed logic: Aggregate mistakes correctly
-        bad_df = pd.read_sql_query("""
-            SELECT word as 'Word', COUNT(*) as 'Times Incorrect' 
-            FROM scores 
-            WHERE correctly_spelled = 0 
-            GROUP BY word 
-            ORDER BY COUNT(*) DESC
-        """, conn)
-        
+        bad_df = pd.read_sql_query("SELECT word as 'Word', COUNT(*) as 'Mistakes' FROM scores WHERE correctly_spelled = 0 GROUP BY word ORDER BY Mistakes DESC", conn)
         if not bad_df.empty:
             st.subheader("❌ Words to Review")
-            st.write("These words will appear when you select 'Incorrect Words Only' in the Exam tab.")
             st.dataframe(bad_df, use_container_width=True, hide_index=True)
-        else:
-            st.success("Perfect score so far! No incorrect words to review. ✨")
+        else: st.success("Perfect score so far! ✨")
