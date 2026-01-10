@@ -24,6 +24,8 @@ st.markdown("""
         }
         /* Custom Magical Banner */
         .magical-banner {
+        background-image: linear-gradient(to right, rgba(26, 16, 34, 0.9) 0%, rgba(26, 16, 34, 0.2) 60%, rgba(26, 16, 34, 0) 100%), url(https://lh3.googleusercontent.com/aida-public/AB6AXuCr7AYPvVeqUPBshUWTIWJ2iXIQ-8K8woQJVGZzn3gXZOsD91x8eOwU5k1T9eDH0b8uekjykG9rQWN9kNidIOCSsd7p06J8IQ-11QKISWUKktStRsvX6OMpfJvCsTRYpo0Od6Lo3PzYt_R-4ub7Qf8h2gF39R8zVmMyA__pbMkAN2-H2q9T7SHEMfm5ULKJ1bkUS8YXaE2PlMU-5ep8QL2i4x-7ScztKYKjlG8ZguBjXW60PcBOj9SX88vAxsPyEuuZpbcOYlkE3Uc);
+            background-position:50% 50%; 
             background: linear-gradient(135deg, #9d25f4 0%, #6d28d9 100%);
             border-radius: 2rem;
             padding: 2.5rem;
@@ -279,3 +281,4 @@ with tab_stats:
             st.rerun()
     finally: conn.close()
     st.markdown('</div>', unsafe_allow_html=True)
+
