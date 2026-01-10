@@ -47,9 +47,17 @@ DATA_FILE = "Spelling bee 2026.xlsx"
 GOAL = 33
 
 def init_db():
-    """Initializes the database without any UNIQUE constraints to avoid IntegrityError."""
+    """Initializes the database and fixes IntegrityErrors by removing old constraints."""
     with sqlite3.connect(DB_PATH) as conn:
-        # We create a simple table that allows multiple attempts for the same word/date
+        # Check if table exists
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='scores'")
+        if cursor.fetchone():
+            # Check if it has the restrictive UNIQUE index from previous versions
+            indices = conn.execute("PRAGMA index_list('scores')").fetchall()
+            if indices:
+                # If old indices exist, drop and recreate to ensure no crashes
+                conn.execute("DROP TABLE scores")
+        
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -73,7 +81,6 @@ def load_words():
 
 def get_incorrect_words():
     with sqlite3.connect(DB_PATH) as conn:
-        # A word is counted as incorrect if its LATEST attempt was a failure
         cursor = conn.execute("""
             SELECT word FROM (
                 SELECT word, correctly_spelled, MAX(id) FROM scores GROUP BY word
@@ -83,7 +90,6 @@ def get_incorrect_words():
 
 def get_today_count():
     with sqlite3.connect(DB_PATH) as conn:
-        # Count unique words successfully spelled today
         cursor = conn.execute("SELECT COUNT(DISTINCT word) FROM scores WHERE date = ? AND correctly_spelled = 1", (date.today().isoformat(),))
         return cursor.fetchone()[0]
 
@@ -147,7 +153,8 @@ with tab_exam:
             if st.form_submit_button("SUBMIT"):
                 is_correct = user_input.strip().lower() == str(curr["word"]).strip().lower()
                 with sqlite3.connect(DB_PATH) as conn:
-                    conn.execute("INSERT INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
+                    # 'OR IGNORE' is a safety fallback for database integrity
+                    conn.execute("INSERT OR IGNORE INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
                                  (date.today().isoformat(), curr["word"], int(is_correct)))
                 st.session_state.last_result = {"correct": is_correct, "word": curr["word"], "definition": curr["definition"], "sentence": curr["sentence"]}
                 st.rerun()
@@ -159,7 +166,7 @@ with tab_exam:
             st.markdown(f"""<div class="study-card"><strong>📖 Meaning:</strong> {res['definition']}<br><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></div>""", unsafe_allow_html=True)
     else: st.info("No words found in this group!")
 
-# --- TAB 2: STUDY ROOM (3 Per Row, Click Word to Play) ---
+# --- TAB 2: STUDY ROOM (3 Per Row, Word as Button) ---
 with tab_learn:
     study_group = st.selectbox("Select Group to Study:", group_options, key="study_select")
     
@@ -175,7 +182,6 @@ with tab_learn:
         cols = st.columns(3)
         for i, (idx, row) in enumerate(row_data.iterrows()):
             with cols[i]:
-                # The word is the button
                 if st.button(f"🔊 {row['word']}", key=f"s_btn_{idx}"):
                     audio_io_s = io.BytesIO()
                     gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_s)
@@ -188,7 +194,7 @@ with tab_learn:
                     </div>
                 """, unsafe_allow_html=True)
 
-# --- TAB 3: PROGRESS (With Danger Zone Reset) ---
+# --- TAB 3: PROGRESS (With Danger Click Reminder) ---
 with tab_stats:
     st.header("📊 My Progress")
     with sqlite3.connect(DB_PATH) as conn:
@@ -203,3 +209,13 @@ with tab_stats:
         if not bad_df.empty:
             st.subheader("❌ Words to Review")
             st.dataframe(bad_df, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            st.subheader("⚠️ Danger Zone")
+            confirm_reset = st.checkbox("I understand resetting deletes all history and the mistake list.")
+            if st.button("RESET INCORRECT WORD LIST", disabled=not confirm_reset):
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("DELETE FROM scores")
+                st.success("History has been successfully cleared!")
+                st.rerun()
+        else: st.success("Perfect score so far! ✨")
