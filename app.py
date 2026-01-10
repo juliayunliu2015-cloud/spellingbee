@@ -9,7 +9,7 @@ from gtts import gTTS
 # --- 1. CONFIGURATION & ACCESSIBILITY SETUP ---
 st.set_page_config(page_title="Spelling Bee 2026", page_icon="✨", layout="wide")
 
-# Custom CSS for Dark Purple Anime Style and High Contrast Accessibility
+# High-contrast CSS for accessibility and visibility
 st.markdown("""
     <style>
         .stApp {
@@ -26,7 +26,7 @@ st.markdown("""
             border: 2px solid #a855f7;
             margin-bottom: 2rem;
         }
-        /* Input Visibility Fix: Deep purple background with bright white text */
+        /* Input Visibility: Deep purple background with bright white text */
         .stTextInput input {
             background-color: #2d1b3d !important;
             color: #FFFFFF !important;
@@ -36,7 +36,7 @@ st.markdown("""
             padding: 1rem !important;
             text-align: center !important;
         }
-        /* Button Visibility Fix: Solid Purple with High Contrast White Text */
+        /* Button Visibility: Solid Purple with High Contrast White Text */
         div.stButton > button {
             background-color: #9d25f4 !important;
             color: #FFFFFF !important;
@@ -46,10 +46,6 @@ st.markdown("""
             font-size: 1.1rem !important;
             padding: 0.8rem !important;
             width: 100%;
-        }
-        div.stButton > button:hover {
-            background-color: #7e22ce !important;
-            border-color: #FFFFFF !important;
         }
         /* Ensure all text labels are white */
         h1, h2, h3, p, label, span { color: #FFFFFF !important; }
@@ -67,7 +63,7 @@ DATA_FILE = "Spelling bee 2026.xlsx"
 DAILY_EXAM_GOAL = 33
 
 def init_db():
-    """Initializes the database tables using a secure context manager."""
+    """Initializes the database using a secure context manager to prevent locks."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scores (
@@ -144,7 +140,7 @@ with tab_exam:
 
         word_to_spell = st.session_state.current_word["word"]
         
-        # Audio Interaction (Hidden Player)
+        # Audio Interaction (Hidden Player triggered by buttons)
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("🪄 CAST SPELL (Hear Word)"):
@@ -157,7 +153,7 @@ with tab_exam:
             audio_io = io.BytesIO()
             gTTS(text=str(word_to_spell), lang="en").write_to_fp(audio_io)
             st.audio(audio_io, format="audio/mp3", autoplay=True)
-            st.session_state.play_trigger = False
+            st.session_state.play_trigger = False # Reset trigger
 
         # Form Logic for Spelling Submission
         with st.form(key="spell_form", clear_on_submit=True):
@@ -166,7 +162,7 @@ with tab_exam:
                 is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
                 today_str = date.today().isoformat()
                 
-                # Securely log attempt and update daily progress
+                # Transactional database update to prevent ProgrammingError
                 with sqlite3.connect(DB_PATH) as conn:
                     conn.execute("""
                         INSERT INTO scores (date, word, correctly_spelled, attempts) 
