@@ -64,6 +64,7 @@ def load_words():
 
 def get_incorrect_words():
     with sqlite3.connect(DB_PATH) as conn:
+        # Fetches words where the most recent attempt or any attempt was a failure
         cursor = conn.execute("SELECT DISTINCT word FROM scores WHERE correctly_spelled = 0")
         return [row[0] for row in cursor.fetchall()]
 
@@ -77,12 +78,13 @@ if "play_trigger" not in st.session_state: st.session_state.play_trigger = False
 st.markdown('<div class="magical-banner"><h1>GO FOR THE GOLD, VIVIAN! 🏆</h1></div>', unsafe_allow_html=True)
 tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Study Room", "📊 Progress"])
 
+# --- TAB 1: DAILY EXAM ---
 with tab_exam:
-    # RESTORED: Incorrect words list in selector
     group_options = ["All Words", "❌ Incorrect Words Only"] + list(range(1, 14))
     exam_group = st.selectbox("Select Study Group:", group_options)
     
-    if exam_group == "All Words": available_words = words_df
+    if exam_group == "All Words": 
+        available_words = words_df
     elif exam_group == "❌ Incorrect Words Only":
         inc_list = get_incorrect_words()
         available_words = words_df[words_df['word'].isin(inc_list)]
@@ -96,15 +98,12 @@ with tab_exam:
             st.session_state.current_word = available_words.sample(1).iloc[0]
 
         curr = st.session_state.current_word
-        
-        # Determine button label based on state
         btn_label = "✨ CAST THE NEXT SPELL" if st.session_state.last_result and st.session_state.last_result["correct"] else "🪄 CAST SPELL (Hear Word)"
         
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button(btn_label):
                 if st.session_state.last_result and st.session_state.last_result["correct"]:
-                    # Advance to next word immediately
                     st.session_state.current_word = available_words.sample(1).iloc[0]
                     st.session_state.last_result = None
                     st.rerun()
@@ -125,8 +124,6 @@ with tab_exam:
                 is_correct = user_input.strip().lower() == str(curr["word"]).strip().lower()
                 with sqlite3.connect(DB_PATH) as conn:
                     conn.execute("INSERT INTO scores (date, word, correctly_spelled, attempts) VALUES (?, ?, ?, ?)", (date.today().isoformat(), curr["word"], int(is_correct), 1))
-                    if is_correct:
-                        conn.execute("INSERT INTO daily_exam_progress (date, correct_count) VALUES (?, 1) ON CONFLICT(date) DO UPDATE SET correct_count = correct_count + 1", (date.today().isoformat(),))
                 st.session_state.last_result = {"correct": is_correct, "word": curr["word"], "definition": curr["definition"], "sentence": curr["sentence"]}
                 st.rerun()
 
@@ -144,16 +141,31 @@ with tab_exam:
     else:
         st.info("No words found in this group yet!")
 
+# --- TAB 2: STUDY ROOM ---
 with tab_learn:
     st.header("📖 Alphabetical Study Room")
-    for idx, row in words_df.head(50).iterrows(): # Show first 50
-        with st.expander(f"Word: {row['word'][0]}..."):
-            st.markdown(f"### {row['word']}")
+    # Clean listing for study
+    for idx, row in words_df.head(100).iterrows():
+        with st.expander(f"{row['word']}"):
             st.write(f"**Meaning:** {row['definition']}")
             st.write(f"**Sentence:** {row['sentence']}")
 
+# --- TAB 3: PROGRESS (FIXED ERROR) ---
 with tab_stats:
     st.header("📊 My Progress")
     with sqlite3.connect(DB_PATH) as conn:
-        bad_df = pd.read_sql_query("SELECT word, COUNT(*) as mistakes FROM scores WHERE correctly_spelled = 0 GROUP BY word ORDER BY mistakes DESC", conn)
-        st.dataframe(bad_df, use_container_width=True) if not bad_df.empty else st.success("Perfect score so far!")
+        # Fixed logic: Aggregate mistakes correctly
+        bad_df = pd.read_sql_query("""
+            SELECT word as 'Word', COUNT(*) as 'Times Incorrect' 
+            FROM scores 
+            WHERE correctly_spelled = 0 
+            GROUP BY word 
+            ORDER BY COUNT(*) DESC
+        """, conn)
+        
+        if not bad_df.empty:
+            st.subheader("❌ Words to Review")
+            st.write("These words will appear when you select 'Incorrect Words Only' in the Exam tab.")
+            st.dataframe(bad_df, use_container_width=True, hide_index=True)
+        else:
+            st.success("Perfect score so far! No incorrect words to review. ✨")
