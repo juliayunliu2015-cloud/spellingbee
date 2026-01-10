@@ -185,10 +185,9 @@ with tab_exam:
     else:
         st.info("No words found in this mode.")
 
-# --- TAB 2: ALPHABETICAL LEARN (1 WORD PER ROW) ---
+# --- TAB 2: ALPHABETICAL LEARN (CLEAN ROW VERSION) ---
 with tab_learn:
     st.header("📖 Alphabetical Study Groups")
-    st.write("Words are sorted A-Z. Review each word and listen to the pronunciation.")
     
     group_num = st.selectbox("Select Learning Group (1-13):", range(1, 14), key="learn_group_choice")
     
@@ -203,34 +202,24 @@ with tab_learn:
 
     # Display words: 1 per row
     for idx, row in current_group.iterrows():
-        # Create an anime-style card for the word information
-        st.markdown(f"""
-            <div class="anime-card" style="margin-bottom: 5px; padding: 15px;">
-                <h4 style="margin:0; color:#ff00ff;">✨ Word {start_idx + idx + 1}</h4>
-                <p style="margin: 5px 0; font-size: 1rem;"><b>Meaning:</b> {row['definition']}</p>
-            </div>
-        """, unsafe_allow_html=True)
+        # Using columns to put the Word + Definition on the left, and Audio on the right
+        col_text, col_audio = st.columns([3, 1])
         
-        # Row for Button and Audio Player
-        col_btn, col_audio = st.columns([1, 2]) # 1 part button, 2 parts audio player
+        word_to_read = str(row['word']).replace('.0', '').strip()
+
+        with col_text:
+            # Display just the word and definition
+            st.markdown(f"### {word_to_read}")
+            st.write(f"**Meaning:** {row['definition']}")
         
-        with col_btn:
-            word_to_read = str(row['word']).replace('.0', '').strip()
-            # The button now says the complete word
-            if st.button(f"🔊 Listen to: {word_to_read}", key=f"btn_row_{idx}"):
-                # This logic generates the audio when clicked
+        with col_audio:
+            # "Listen" button that triggers the sound
+            # Note: We use the key to keep each button unique
+            if st.button(f"🔊 Listen", key=f"btn_study_{idx}"):
                 audio_io_learn = io.BytesIO()
                 gTTS(text=word_to_read, lang="en").write_to_fp(audio_io_learn)
-                st.session_state[f"audio_data_{idx}"] = audio_io_learn.getvalue()
-
-        with col_audio:
-            # Display the audio player in the same row
-            # If the button was clicked, we play that specific data
-            if f"audio_data_{idx}" in st.session_state:
-                st.audio(st.session_state[f"audio_data_{idx}"], format="audio/mp3")
-            else:
-                # Placeholder so the layout stays aligned before clicking
-                st.write(" ") 
+                # We use autoplay=True so it plays the moment the button is clicked
+                st.audio(audio_io_learn, format="audio/mp3", autoplay=True)
         
         st.divider()
 
@@ -267,6 +256,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
