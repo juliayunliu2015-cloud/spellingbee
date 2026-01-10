@@ -230,8 +230,7 @@ with tab_exam:
             # SHOW MEANING AND SENTENCE
             st.markdown(f"""
                 <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-top: 10px;">
-                    <p><strong>📖 Meaning:</strong> {res['definition']}</p>
-                    <p><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></p>
+                    <p><strong>📖 Meaning/Example:</strong> {res['definition']}</p>
                 </div>
             """, unsafe_allow_html=True)
             
@@ -290,3 +289,4 @@ with tab_stats:
             st.dataframe(bad_df, use_container_width=True)
         else:
             st.success("No mistakes yet! You're doing a magical job, Vivian!")
+
