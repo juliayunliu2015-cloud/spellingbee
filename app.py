@@ -210,7 +210,7 @@ with tab_learn:
                     # Anime-style Card Container
                     st.markdown(f"""
                         <div class="anime-card">
-                            <p style="margin-bottom:10px; font-size:0.9rem;">
+                            <p style="margin-bottom:10px; ">
                                 <b>Meaning:</b> {row['definition']}
                             </p>
                         </div>
@@ -260,6 +260,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
