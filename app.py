@@ -48,11 +48,18 @@ st.markdown("""
             width: 100%;
         }
         /* Ensure all text labels are white */
-        h1, h2, h3, p, label, span { color: #FFFFFF !important; }
+        h1, h2, h3, p, label, span, div { color: #FFFFFF !important; }
         
         /* Hide the default audio player visually */
         div[data-testid="stAudio"] {
             display: none;
+        }
+        
+        /* Expander Styling */
+        .streamlit-expanderHeader {
+            background-color: #2d1b3d !important;
+            color: white !important;
+            border-radius: 10px;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -103,6 +110,9 @@ def load_words():
     except: 
         return pd.DataFrame(columns=["word", "definition", "sentence"])
 
+def mask_vowels(word):
+    return "".join("_" if char.lower() in "aeiou" else char for char in word)
+
 init_db()
 words_df = load_words()
 
@@ -110,6 +120,7 @@ words_df = load_words()
 if "current_word" not in st.session_state: st.session_state.current_word = None
 if "last_result" not in st.session_state: st.session_state.last_result = None
 if "play_trigger" not in st.session_state: st.session_state.play_trigger = False
+if "learn_audio" not in st.session_state: st.session_state.learn_audio = None
 
 # --- 3. UI DISPLAY ---
 st.markdown("""
@@ -121,8 +132,10 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-tab_exam, tab_stats = st.tabs(["🎯 Daily Exam", "📊 Progress"])
+# TABS: Added "Study Room" back
+tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Study Room", "📊 Progress"])
 
+# --- TAB 1: DAILY EXAM ---
 with tab_exam:
     exam_group = st.selectbox("Select Study Group:", ["All Words"] + list(range(1, 14)))
     
@@ -139,6 +152,8 @@ with tab_exam:
             st.session_state.current_word = available_words.sample(1).iloc[0]
 
         word_to_spell = st.session_state.current_word["word"]
+        definition = st.session_state.current_word["definition"]
+        sentence = st.session_state.current_word["sentence"]
         
         # Audio Interaction (Hidden Player)
         col_a, col_b = st.columns(2)
@@ -162,9 +177,8 @@ with tab_exam:
                 is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
                 today_str = date.today().isoformat()
                 
-                # FIXED: Corrected parameter count here
+                # Transactional database update
                 with sqlite3.connect(DB_PATH) as conn:
-                    # We use 4 placeholders (?,?,?,?) for 4 values
                     conn.execute("""
                         INSERT INTO scores (date, word, correctly_spelled, attempts) 
                         VALUES (?, ?, ?, ?)
@@ -177,18 +191,34 @@ with tab_exam:
                             ON CONFLICT(date) DO UPDATE SET correct_count = correct_count + 1
                         """, (today_str,))
                 
-                st.session_state.last_result = {"correct": is_correct, "word": word_to_spell}
+                # SAVE DEFINITION AND SENTENCE TO DISPLAY AFTER CHECK
+                st.session_state.last_result = {
+                    "correct": is_correct, 
+                    "word": word_to_spell,
+                    "definition": definition,
+                    "sentence": sentence
+                }
+                
                 if is_correct: 
                     st.session_state.current_word = available_words.sample(1).iloc[0]
                 st.rerun()
 
-        # Feedback Section
+        # Feedback Section (Now shows Meaning & Sentence)
         if st.session_state.last_result:
-            if st.session_state.last_result["correct"]: 
+            res = st.session_state.last_result
+            if res["correct"]: 
                 st.balloons()
                 st.success("✨ Excellent! That's correct.")
             else: 
-                st.error(f"❌ Not quite. The word was: {st.session_state.last_result['word']}")
+                st.error(f"❌ Not quite. The word was: {res['word']}")
+            
+            # SHOW MEANING AND SENTENCE
+            st.markdown(f"""
+                <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; margin-top: 10px;">
+                    <p><strong>📖 Meaning:</strong> {res['definition']}</p>
+                    <p><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></p>
+                </div>
+            """, unsafe_allow_html=True)
             
             if st.button("Next Word ➡️"):
                 st.session_state.last_result = None
@@ -196,6 +226,39 @@ with tab_exam:
     else:
         st.info("No words found for this selection.")
 
+# --- TAB 2: STUDY ROOM (RESTORED) ---
+with tab_learn:
+    st.header("📖 Alphabetical Study Room")
+    learn_group = st.selectbox("Select Group to Study:", range(1, 14), key="learn_group_select")
+    
+    # Logic to split words into groups
+    words_per_group = max(1, len(words_df) // 13)
+    start_idx = (learn_group - 1) * words_per_group
+    end_idx = start_idx + words_per_group if learn_group < 13 else len(words_df)
+    study_words = words_df.iloc[start_idx:end_idx]
+
+    # Handle Audio for Learn Tab
+    if st.session_state.learn_audio:
+        audio_io = io.BytesIO()
+        gTTS(text=str(st.session_state.learn_audio), lang="en").write_to_fp(audio_io)
+        st.audio(audio_io, format="audio/mp3", autoplay=True)
+        st.session_state.learn_audio = None # Reset
+
+    for idx, row in study_words.iterrows():
+        # Masked title to encourage guessing before revealing
+        with st.expander(f"{idx+1}. {mask_vowels(row['word'])}"):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"### 🔤 {row['word']}")
+                st.write(f"**Meaning:** {row['definition']}")
+                st.write(f"**Sentence:** *{row['sentence']}*")
+            with col2:
+                # Unique key for every button to prevent conflicts
+                if st.button("🔊 Listen", key=f"btn_learn_{idx}"):
+                    st.session_state.learn_audio = row['word']
+                    st.rerun()
+
+# --- TAB 3: PROGRESS ---
 with tab_stats:
     st.header("📊 My Progress")
     with sqlite3.connect(DB_PATH) as conn:
