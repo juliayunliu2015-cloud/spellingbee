@@ -12,7 +12,7 @@ st.set_page_config(page_title="Spelling Bee 2026", page_icon="🐝", layout="cen
 
 # --- ENCOURAGEMENT HEADER ---
 st.markdown("""
-    <div style="background-color:#FFD700; padding:20px; border-radius:15px; text-align:center; margin-bottom:25px; border: 2px solid #DAA520;">
+    <div style="background-image: linear-gradient(to right, rgba(26, 16, 34, 0.9) 0%, rgba(26, 16, 34, 0.2) 60%, rgba(26, 16, 34, 0) 100%), url(https://lh3.googleusercontent.com/aida-public/AB6AXuCr7AYPvVeqUPBshUWTIWJ2iXIQ-8K8woQJVGZzn3gXZOsD91x8eOwU5k1T9eDH0b8uekjykG9rQWN9kNidIOCSsd7p06J8IQ-11QKISWUKktStRsvX6OMpfJvCsTRYpo0Od6Lo3PzYt_R-4ub7Qf8h2gF39R8zVmMyA__pbMkAN2-H2q9T7SHEMfm5ULKJ1bkUS8YXaE2PlMU-5ep8QL2i4x-7ScztKYKjlG8ZguBjXW60PcBOj9SX88vAxsPyEuuZpbcOYlkE3Uc); padding:20px; border-radius:15px; text-align:center; margin-bottom:25px; border: 2px solid #DAA520;">
         <h1 style="color:#000; margin:0; font-family: 'Arial Black', sans-serif;">🏆 GO FOR THE GOLD, VIVIAN! 🏆</h1>
         <p style="color:#333; font-size:1.2rem; font-weight:bold; margin:10px 0 0 0;">
             "Every word you master today is a step closer to the 2026 Trophy! 🐝✨"
@@ -248,3 +248,4 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
