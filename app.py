@@ -6,7 +6,7 @@ import io
 from datetime import date
 from gtts import gTTS
 
-# --- 1. CONFIGURATION & ACCESSIBILITY SETUP ---
+# --- 1. CONFIGURATION ---
 st.set_page_config(page_title="Spelling Bee 2026", page_icon="✨", layout="wide")
 
 st.markdown("""
@@ -27,27 +27,29 @@ st.markdown("""
             border: 2px solid #c084fc !important; border-radius: 0.75rem !important;
             font-weight: 800 !important; font-size: 1.1rem !important; padding: 0.8rem !important; width: 100%;
         }
-        h1, h2, h3, p, label, span, div { color: #FFFFFF !important; }
-        div[data-testid="stAudio"] { display: none; }
-        
         .study-card {
             background: rgba(255, 255, 255, 0.05);
             border-left: 5px solid #9d25f4;
-            padding: 15px;
-            margin-bottom: 25px;
-            border-radius: 10px;
-            min-height: 180px;
+            padding: 15px; margin-bottom: 25px; border-radius: 10px; min-height: 180px;
         }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DATABASE AND DATA LOGIC ---
+# --- 2. DATABASE LOGIC (REPAIR-READY) ---
 DB_PATH = "scores.db"
 DATA_FILE = "Spelling bee 2026.xlsx"
 GOAL = 33
 
 def init_db():
+    """Initializes the DB and REPAIRS it if it has old restrictive UNIQUE rules."""
     with sqlite3.connect(DB_PATH) as conn:
+        # Check if table exists and if it has a UNIQUE constraint
+        cursor = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='scores'")
+        row = cursor.fetchone()
+        if row and "UNIQUE" in row[0].upper():
+            # Drop the table if it's the old 'broken' version
+            conn.execute("DROP TABLE scores")
+            
         conn.execute("""
             CREATE TABLE IF NOT EXISTS scores (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -70,9 +72,14 @@ def load_words():
     except: return pd.DataFrame(columns=["word", "definition", "sentence"])
 
 def get_incorrect_words():
-    """Returns any word that has at least one 'incorrect' entry in history."""
+    """Finds words where the LATEST attempt was a failure."""
     with sqlite3.connect(DB_PATH) as conn:
-        cursor = conn.execute("SELECT DISTINCT word FROM scores WHERE correctly_spelled = 0")
+        cursor = conn.execute("""
+            SELECT word FROM (
+                SELECT word, correctly_spelled, MAX(id) as last_id 
+                FROM scores GROUP BY word
+            ) WHERE correctly_spelled = 0
+        """)
         return [row[0] for row in cursor.fetchall()]
 
 def get_today_count():
@@ -83,7 +90,7 @@ def get_today_count():
 init_db()
 words_df = load_words()
 
-# Session States
+# --- 3. SESSION STATE ---
 if "current_word" not in st.session_state: st.session_state.current_word = None
 if "last_result" not in st.session_state: st.session_state.last_result = None
 if "play_trigger" not in st.session_state: st.session_state.play_trigger = False
@@ -105,8 +112,7 @@ with tab_exam:
     
     exam_group = st.selectbox("Select Exam Group:", group_options)
     
-    if exam_group == "All Words": 
-        available_words = words_df
+    if exam_group == "All Words": available_words = words_df
     elif exam_group == "❌ Incorrect Words Only":
         available_words = words_df[words_df['word'].isin(get_incorrect_words())]
     else:
@@ -126,8 +132,7 @@ with tab_exam:
                 st.session_state.current_word = available_words.sample(1).iloc[0]
                 st.session_state.last_result = None
                 st.rerun()
-            else:
-                st.session_state.play_trigger = True
+            else: st.session_state.play_trigger = True
 
         if st.session_state.play_trigger:
             audio_io = io.BytesIO()
@@ -152,7 +157,7 @@ with tab_exam:
             st.markdown(f"""<div class="study-card"><strong>📖 Meaning:</strong> {res['definition']}<br><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></div>""", unsafe_allow_html=True)
     else: st.info("No words found in this group!")
 
-# --- TAB 2: STUDY ROOM ---
+# --- TAB 2: STUDY ROOM (Grid 3 per row) ---
 with tab_learn:
     study_group = st.selectbox("Select Group to Study:", group_options, key="study_select")
     
@@ -171,40 +176,4 @@ with tab_learn:
                 if st.button(f"🔊 {row['word']}", key=f"s_btn_{idx}"):
                     audio_io_s = io.BytesIO()
                     gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_s)
-                    st.audio(audio_io_s, format="audio/mp3", autoplay=True)
-                
-                st.markdown(f"""
-                    <div class="study-card">
-                        <small><strong>Meaning:</strong> {row['definition']}</small><br>
-                        <small><em>"{row['sentence']}"</em></small>
-                    </div>
-                """, unsafe_allow_html=True)
-
-# --- TAB 3: PROGRESS (Simpler Query) ---
-with tab_stats:
-    st.header("📊 My Progress")
-    with sqlite3.connect(DB_PATH) as conn:
-        # This shows every word that has been missed, and how many times.
-        bad_df = pd.read_sql_query("""
-            SELECT word as 'Word', COUNT(*) as 'Total Mistakes' 
-            FROM scores 
-            WHERE correctly_spelled = 0 
-            GROUP BY word 
-            ORDER BY COUNT(*) DESC
-        """, conn)
-        
-        if not bad_df.empty:
-            st.subheader("❌ Words You've Missed")
-            st.write("Keep practicing these until the mistake count stops growing!")
-            st.dataframe(bad_df, use_container_width=True, hide_index=True)
-            
-            st.divider()
-            st.subheader("⚠️ Danger Zone")
-            confirm_reset = st.checkbox("I understand resetting deletes all history and the mistake list.")
-            if st.button("RESET INCORRECT WORD LIST", disabled=not confirm_reset):
-                with sqlite3.connect(DB_PATH) as conn:
-                    conn.execute("DELETE FROM scores")
-                st.success("History has been successfully cleared!")
-                st.rerun()
-        else:
-            st.success("No mistakes yet! Vivian, you are a spelling genius! ✨")
+                    st.audio(audio_io_s, format="audio/mp3", autoplay=True
