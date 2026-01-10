@@ -185,12 +185,11 @@ with tab_exam:
     else:
         st.info("No words found in this mode.")
 
-# --- TAB 2: ALPHABETICAL LEARN (REMASTERED) ---
+# --- TAB 2: ALPHABETICAL LEARN (1 WORD PER ROW) ---
 with tab_learn:
     st.header("📖 Alphabetical Study Groups")
-    st.write("Click any word button to hear it! Words are organized in a 3-column grid.")
+    st.write("Words are sorted A-Z. Review each word and listen to the pronunciation.")
     
-    # Selection for group
     group_num = st.selectbox("Select Learning Group (1-13):", range(1, 14), key="learn_group_choice")
     
     # Calculate group slice
@@ -198,34 +197,42 @@ with tab_learn:
     start_idx = (group_num - 1) * words_per_group
     end_idx = start_idx + words_per_group if group_num < 13 else len(words_df)
     
-    current_group = words_df.iloc[start_idx:end_idx].reset_index()
+    current_group = words_df.iloc[start_idx:end_idx].reset_index(drop=True)
+    
+    st.divider()
 
-    # Create the 3-column grid
-    for i in range(0, len(current_group), 3):
-        cols = st.columns(3)
-        for j in range(3):
-            if i + j < len(current_group):
-                row = current_group.iloc[i + j]
-                with cols[j]:
-                    # Anime-style Card Container
-                    st.markdown(f"""
-                        <div class="anime-card">
-                            <p style="margin-bottom:10px; ">
-                                <b>Meaning:</b> {row['definition']}
-                            </p>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Button with the complete word
-                    # Key is unique to avoid streamlit duplicate errors
-                    if st.button(f"🔊 {row['word']}", key=f"audio_learn_{row['word']}_{i+j}"):
-                        audio_io_learn = io.BytesIO()
-                        # Clean word string just in case there are float leftovers (.0)
-                        word_to_read = str(row['word']).replace('.0', '')
-                        gTTS(text=word_to_read, lang="en").write_to_fp(audio_io_learn)
-                        
-                        # st.audio with autoplay=True and the CSS display:none hidden player
-                        st.audio(audio_io_learn, format="audio/mp3", autoplay=True)
+    # Display words: 1 per row
+    for idx, row in current_group.iterrows():
+        # Create an anime-style card for the word information
+        st.markdown(f"""
+            <div class="anime-card" style="margin-bottom: 5px; padding: 15px;">
+                <h4 style="margin:0; color:#ff00ff;">✨ Word {start_idx + idx + 1}</h4>
+                <p style="margin: 5px 0; font-size: 1rem;"><b>Meaning:</b> {row['definition']}</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Row for Button and Audio Player
+        col_btn, col_audio = st.columns([1, 2]) # 1 part button, 2 parts audio player
+        
+        with col_btn:
+            word_to_read = str(row['word']).replace('.0', '').strip()
+            # The button now says the complete word
+            if st.button(f"🔊 Listen to: {word_to_read}", key=f"btn_row_{idx}"):
+                # This logic generates the audio when clicked
+                audio_io_learn = io.BytesIO()
+                gTTS(text=word_to_read, lang="en").write_to_fp(audio_io_learn)
+                st.session_state[f"audio_data_{idx}"] = audio_io_learn.getvalue()
+
+        with col_audio:
+            # Display the audio player in the same row
+            # If the button was clicked, we play that specific data
+            if f"audio_data_{idx}" in st.session_state:
+                st.audio(st.session_state[f"audio_data_{idx}"], format="audio/mp3")
+            else:
+                # Placeholder so the layout stays aligned before clicking
+                st.write(" ") 
+        
+        st.divider()
 
 # --- TAB 3: MY PROGRESS ---
 with tab_stats:
@@ -260,6 +267,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
