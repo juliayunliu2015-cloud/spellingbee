@@ -22,6 +22,10 @@ st.markdown("""
             border: 2px solid #9d25f4 !important; border-radius: 0.75rem !important;
             font-size: 1.5rem !important; padding: 1rem !important; text-align: center !important;
         }
+        /* Word Button Styling for Study Room */
+        .word-btn-container div[data-testid="stVerticalBlock"] > div:has(button) {
+            margin-bottom: -10px;
+        }
         div.stButton > button {
             background-color: #9d25f4 !important; color: #FFFFFF !important;
             border: 2px solid #c084fc !important; border-radius: 0.75rem !important;
@@ -30,13 +34,13 @@ st.markdown("""
         h1, h2, h3, p, label, span, div { color: #FFFFFF !important; }
         div[data-testid="stAudio"] { display: none; }
         
-        /* Study Card Styling */
         .study-card {
             background: rgba(255, 255, 255, 0.05);
             border-left: 5px solid #9d25f4;
-            padding: 20px;
-            margin-bottom: 15px;
+            padding: 15px;
+            margin-bottom: 25px;
             border-radius: 10px;
+            min-height: 180px;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -44,10 +48,11 @@ st.markdown("""
 # --- 2. DATABASE AND DATA LOGIC ---
 DB_PATH = "scores.db"
 DATA_FILE = "Spelling bee 2026.xlsx"
+GOAL = 33
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS scores (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, word TEXT, correctly_spelled INTEGER, attempts INTEGER)")
+        conn.execute("CREATE TABLE IF NOT EXISTS scores (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, word TEXT, correctly_spelled INTEGER)")
 
 @st.cache_data
 def load_words():
@@ -57,15 +62,7 @@ def load_words():
         word_col = next((c for c in df.columns if str(c).lower() in ["word", "spelling"]), df.columns[0])
         def_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["def", "meaning", "desc"])), None)
         sent_col = next((c for c in df.columns if any(k in str(c).lower() for k in ["sentence", "example", "usage"])), None)
-        
-        clean_rows = []
-        for _, row in df.iterrows():
-            if pd.isna(row[word_col]): continue
-            clean_rows.append({
-                "word": str(row[word_col]).strip(),
-                "definition": str(row[def_col]).strip() if def_col and not pd.isna(row[def_col]) else "No definition available.",
-                "sentence": str(row[sent_col]).strip() if sent_col and not pd.isna(row[sent_col]) else "No sample sentence available."
-            })
+        clean_rows = [{"word": str(row[word_col]).strip(), "definition": str(row[def_col]).strip() if def_col else "N/A", "sentence": str(row[sent_col]).strip() if sent_col else "N/A"} for _, row in df.iterrows() if not pd.isna(row[word_col])]
         return pd.DataFrame(clean_rows).sort_values("word").reset_index(drop=True)
     except: return pd.DataFrame(columns=["word", "definition", "sentence"])
 
@@ -74,9 +71,15 @@ def get_incorrect_words():
         cursor = conn.execute("SELECT DISTINCT word FROM scores WHERE correctly_spelled = 0")
         return [row[0] for row in cursor.fetchall()]
 
+def get_today_count():
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("SELECT COUNT(DISTINCT word) FROM scores WHERE date = ? AND correctly_spelled = 1", (date.today().isoformat(),))
+        return cursor.fetchone()[0]
+
 init_db()
 words_df = load_words()
 
+# Session States
 if "current_word" not in st.session_state: st.session_state.current_word = None
 if "last_result" not in st.session_state: st.session_state.last_result = None
 if "play_trigger" not in st.session_state: st.session_state.play_trigger = False
@@ -84,39 +87,44 @@ if "play_trigger" not in st.session_state: st.session_state.play_trigger = False
 st.markdown('<div class="magical-banner"><h1>GO FOR THE GOLD, VIVIAN! 🏆</h1></div>', unsafe_allow_html=True)
 tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Study Room", "📊 Progress"])
 
-# Shared Group Selector Logic
 group_options = ["All Words", "❌ Incorrect Words Only"] + list(range(1, 14))
 
 # --- TAB 1: DAILY EXAM ---
 with tab_exam:
+    today_score = get_today_count()
+    st.subheader(f"Progress Today: {today_score} / {GOAL} words")
+    
+    if today_score >= GOAL:
+        st.snow() # Huge fireworks/snow congrats
+        st.balloons()
+        st.success(f"🎊 AMAZING! You've mastered {GOAL} words today! Vivian is a Spelling Queen! 👑")
+    
     exam_group = st.selectbox("Select Exam Group:", group_options)
     
     if exam_group == "All Words": available_words = words_df
     elif exam_group == "❌ Incorrect Words Only":
-        inc_list = get_incorrect_words()
-        available_words = words_df[words_df['word'].isin(inc_list)]
+        available_words = words_df[words_df['word'].isin(get_incorrect_words())]
     else:
         words_per_group = max(1, len(words_df) // 13)
-        start_idx = (exam_group - 1) * words_per_group
-        available_words = words_df.iloc[start_idx : start_idx + words_per_group]
+        available_words = words_df.iloc[(exam_group-1)*words_per_group : exam_group*words_per_group]
 
     if not available_words.empty:
         if st.session_state.current_word is None or st.session_state.current_word["word"] not in available_words["word"].values:
             st.session_state.current_word = available_words.sample(1).iloc[0]
 
         curr = st.session_state.current_word
-        btn_label = "✨ CAST THE NEXT SPELL" if st.session_state.last_result and st.session_state.last_result["correct"] else "🪄 CAST SPELL (Hear Word)"
         
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button(btn_label):
-                if st.session_state.last_result and st.session_state.last_result["correct"]:
-                    st.session_state.current_word = available_words.sample(1).iloc[0]
-                    st.session_state.last_result = None
-                    st.rerun()
-                else: st.session_state.play_trigger = True
-        with col_b:
-            if st.button("🔄 RE-PLAY"): st.session_state.play_trigger = True
+        # Logic: After correct spelling, button text changes and advances word
+        is_ready_for_next = st.session_state.last_result and st.session_state.last_result["correct"]
+        btn_label = "✨ CAST THE NEXT SPELL" if is_ready_for_next else "🪄 CAST SPELL (Hear Word)"
+        
+        if st.button(btn_label):
+            if is_ready_for_next:
+                st.session_state.current_word = available_words.sample(1).iloc[0]
+                st.session_state.last_result = None
+                st.rerun()
+            else:
+                st.session_state.play_trigger = True
 
         if st.session_state.play_trigger:
             audio_io = io.BytesIO()
@@ -126,56 +134,67 @@ with tab_exam:
 
         with st.form(key="spell_form", clear_on_submit=True):
             user_input = st.text_input("Type the word you hear:", placeholder="Spell here...")
-            if st.form_submit_button("SUBMIT SPELLING"):
+            if st.form_submit_button("SUBMIT"):
                 is_correct = user_input.strip().lower() == str(curr["word"]).strip().lower()
                 with sqlite3.connect(DB_PATH) as conn:
-                    conn.execute("INSERT INTO scores (date, word, correctly_spelled, attempts) VALUES (?, ?, ?, ?)", (date.today().isoformat(), curr["word"], int(is_correct), 1))
+                    conn.execute("INSERT INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", (date.today().isoformat(), curr["word"], int(is_correct)))
                 st.session_state.last_result = {"correct": is_correct, "word": curr["word"], "definition": curr["definition"], "sentence": curr["sentence"]}
                 st.rerun()
 
         if st.session_state.last_result:
             res = st.session_state.last_result
-            if res["correct"]: st.balloons(); st.success(f"✨ Correct!")
+            if res["correct"]: st.success("✨ Correct!")
             else: st.error(f"❌ Incorrect. The word was: {res['word']}")
             st.markdown(f"""<div class="study-card"><strong>📖 Meaning:</strong> {res['definition']}<br><strong>🗣️ Example:</strong> <em>"{res['sentence']}"</em></div>""", unsafe_allow_html=True)
-    else: st.info("No words found in this group yet!")
+    else: st.info("No words found in this group!")
 
-# --- TAB 2: STUDY ROOM (NO ACCORDIONS) ---
+# --- TAB 2: STUDY ROOM (3 PER ROW) ---
 with tab_learn:
-    st.header("📖 Alphabetical Study Room")
-    study_group = st.selectbox("Select Group to Study:", group_options, key="study_room_select")
+    study_group = st.selectbox("Select Group to Study:", group_options, key="study_select")
     
     if study_group == "All Words": study_list = words_df
     elif study_group == "❌ Incorrect Words Only":
-        inc_list = get_incorrect_words()
-        study_list = words_df[words_df['word'].isin(inc_list)]
+        study_list = words_df[words_df['word'].isin(get_incorrect_words())]
     else:
         words_per_group = max(1, len(words_df) // 13)
-        start_idx = (study_group - 1) * words_per_group
-        study_list = words_df.iloc[start_idx : start_idx + words_per_group]
+        study_list = words_df.iloc[(study_group-1)*words_per_group : study_group*words_per_group]
 
-    for idx, row in study_list.iterrows():
-        # Display as a Card for better visibility
-        st.markdown(f"""
-            <div class="study-card">
-                <h3 style="margin:0; color:#c084fc;">{row['word']}</h3>
-                <p style="margin:5px 0;"><strong>Meaning:</strong> {row['definition']}</p>
-                <p style="margin:5px 0;"><em>"{row['sentence']}"</em></p>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        # Audio Button right below the card
-        if st.button(f"🔊 Listen to {row['word']}", key=f"study_btn_{idx}"):
-            audio_io_learn = io.BytesIO()
-            gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_learn)
-            st.audio(audio_io_learn, format="audio/mp3", autoplay=True)
+    # Array words 3 per row
+    rows = [study_list.iloc[i:i+3] for i in range(0, len(study_list), 3)]
+    for row_data in rows:
+        cols = st.columns(3)
+        for i, (idx, row) in enumerate(row_data.iterrows()):
+            with cols[i]:
+                # Word itself is the button
+                if st.button(f"🔊 {row['word']}", key=f"s_btn_{idx}"):
+                    audio_io_s = io.BytesIO()
+                    gTTS(text=str(row['word']), lang="en").write_to_fp(audio_io_s)
+                    st.audio(audio_io_s, format="audio/mp3", autoplay=True)
+                
+                st.markdown(f"""
+                    <div class="study-card">
+                        <small><strong>Meaning:</strong> {row['definition']}</small><br>
+                        <small><em>"{row['sentence']}"</em></small>
+                    </div>
+                """, unsafe_allow_html=True)
 
-# --- TAB 3: PROGRESS ---
+# --- TAB 3: PROGRESS (RESET WITH REMINDER) ---
 with tab_stats:
     st.header("📊 My Progress")
     with sqlite3.connect(DB_PATH) as conn:
         bad_df = pd.read_sql_query("SELECT word as 'Word', COUNT(*) as 'Mistakes' FROM scores WHERE correctly_spelled = 0 GROUP BY word ORDER BY Mistakes DESC", conn)
+        
         if not bad_df.empty:
             st.subheader("❌ Words to Review")
             st.dataframe(bad_df, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            st.subheader("⚠️ Danger Zone")
+            st.write("Resetting your list will delete all records of words you missed.")
+            confirm_reset = st.checkbox("I understand this is dangerous and cannot be undone.")
+            if st.button("RESET INCORRECT WORD LIST", disabled=not confirm_reset):
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("DELETE FROM scores")
+                st.success("Incorrect words list has been cleared!")
+                st.rerun()
         else: st.success("Perfect score so far! ✨")
