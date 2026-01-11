@@ -94,13 +94,12 @@ if "exam_mode" not in st.session_state:
 # --- UI TABS ---
 tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Alphabetical Learn", "📊 My Progress"])
 
-# --- TAB 1: DAILY EXAM ---
+# --- TAB 1: DAILY EXAM (UPDATED WITH SHUFFLED QUEUE) ---
 with tab_exam:
     st.header("Daily Challenge")
     
     modes = ["All Words", "❌ Incorrect Words Only"] + list(range(1, 14))
     
-    # Selection logic
     if st.session_state.exam_mode not in modes:
         st.session_state.exam_mode = "All Words"
         
@@ -110,35 +109,48 @@ with tab_exam:
         index=modes.index(st.session_state.exam_mode),
         key="exam_mode_selector"
     )
-    st.session_state.exam_mode = exam_group
 
-    # Filter Logic
+    # --- QUEUE INITIALIZATION ---
+    # We clear the queue if the user changes the group mode
+    if "word_queue" not in st.session_state or st.session_state.exam_mode != exam_group:
+        st.session_state.exam_mode = exam_group
+        st.session_state.word_queue = [] # Reset deck
+
+    # Filter Logic for the "Deck"
     if exam_group == "All Words":
-        available_words = words_df
+        pool = words_df
     elif exam_group == "❌ Incorrect Words Only":
         conn = get_db_connection()
         bad_list = [row['word'] for row in conn.execute("SELECT DISTINCT word FROM scores WHERE correctly_spelled = 0").fetchall()]
         conn.close()
-        available_words = words_df[words_df['word'].isin(bad_list)]
+        pool = words_df[words_df['word'].isin(bad_list)]
     else:
         words_per_group = max(1, len(words_df) // 13)
         start_idx = (exam_group - 1) * words_per_group
         end_idx = start_idx + words_per_group if exam_group < 13 else len(words_df)
-        available_words = words_df.iloc[start_idx:end_idx]
+        pool = words_df.iloc[start_idx:end_idx]
 
-    if not available_words.empty:
-        if st.session_state.current_word is None or st.session_state.current_word["word"] not in available_words["word"].values:
-            st.session_state.current_word = available_words.sample(1).iloc[0]
-            st.session_state.attempts = 0
+    # --- DECK REPLENISHMENT ---
+    # If the queue is empty, we "reshuffle the deck"
+    if not pool.empty and len(st.session_state.word_queue) == 0:
+        indices = pool.index.tolist()
+        random.shuffle(indices)
+        st.session_state.word_queue = indices
+        # Set the first word from the new shuffled queue
+        st.session_state.current_word = pool.loc[st.session_state.word_queue.pop(0)]
+        st.session_state.attempts = 0
 
+    if not pool.empty:
         # Progress Bar
         conn = get_db_connection()
         today_date = date.today().isoformat()
         row = conn.execute("SELECT correct_count FROM daily_exam_progress WHERE date = ?", (today_date,)).fetchone()
         score_today = row[0] if row else 0
         conn.close()
+        
         st.progress(min(score_today / DAILY_EXAM_GOAL, 1.0))
         st.write(f"Daily Progress: **{score_today} / {DAILY_EXAM_GOAL}**")
+        st.write(f"🎴 Words remaining in deck: **{len(st.session_state.word_queue)}**")
 
         # Audio
         word_to_spell = st.session_state.current_word["word"]
@@ -163,10 +175,15 @@ with tab_exam:
 
                 if is_correct:
                     conn.execute("INSERT INTO daily_exam_progress (date, correct_count, total_attempted) VALUES (?, 1, 1) ON CONFLICT(date) DO UPDATE SET correct_count = correct_count + 1, total_attempted = total_attempted + 1", (today_date,))
-                    st.session_state.current_word = available_words.sample(1).iloc[0]
+                    # Draw NEXT word from deck if correct
+                    if st.session_state.word_queue:
+                        st.session_state.current_word = pool.loc[st.session_state.word_queue.pop(0)]
+                    else:
+                        st.session_state.current_word = None # Will trigger reshuffle next loop
                     st.session_state.attempts = 0
                 else:
                     conn.execute("INSERT INTO daily_exam_progress (date, total_attempted) VALUES (?, 1) ON CONFLICT(date) DO UPDATE SET total_attempted = total_attempted + 1", (today_date,))
+                
                 conn.commit()
                 conn.close()
                 st.rerun()
@@ -180,6 +197,12 @@ with tab_exam:
                 st.write(f"**Meaning:** {res['definition']}")
        
             if st.button("Next Word"):
+                # If they want to skip the word they missed, we draw from deck
+                if st.session_state.word_queue:
+                    st.session_state.current_word = pool.loc[st.session_state.word_queue.pop(0)]
+                    st.session_state.attempts = 0
+                else:
+                    st.session_state.current_word = None
                 st.session_state.last_result = None
                 st.rerun()
     else:
@@ -257,6 +280,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
