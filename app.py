@@ -94,94 +94,96 @@ if "exam_mode" not in st.session_state:
 # --- UI TABS ---
 tab_exam, tab_learn, tab_stats = st.tabs(["🎯 Daily Exam", "📖 Alphabetical Learn", "📊 My Progress"])
 
-# --- TAB 1: DAILY EXAM (SHUFFLE & SEQUENTIAL QUEUE) ---
+# --- TAB 1: DAILY EXAM ---
 with tab_exam:
-    today_score = get_today_count()
-    st.metric("Words Conquered Today", f"{today_score} / {DAILY_EXAM_GOAL}")
-
-    # Initialize the Shuffled Queue in session state
-    if "shuffled_queue" not in st.session_state:
-        st.session_state.shuffled_queue = []
+    st.header("Daily Challenge")
     
-    if "current_word" not in st.session_state:
-        st.session_state.current_word = None
+    modes = ["All Words", "❌ Incorrect Words Only"] + list(range(1, 14))
+    
+    # Selection logic
+    if st.session_state.exam_mode not in modes:
+        st.session_state.exam_mode = "All Words"
+        
+    exam_group = st.selectbox(
+        "Select Exam Group or Practice Mode:",
+        options=modes,
+        index=modes.index(st.session_state.exam_mode),
+        key="exam_mode_selector"
+    )
+    st.session_state.exam_mode = exam_group
 
-    # Quest selection logic
-    group_options = ["All Words"] + [f"Group {i}" for i in range(1, 14)]
-    selection = st.selectbox("Choose Your Quest Difficulty:", group_options)
-
-    # 1. Filter the pool based on selection
-    if selection == "All Words":
-        pool = words_df
+    # Filter Logic
+    if exam_group == "All Words":
+        available_words = words_df
+    elif exam_group == "❌ Incorrect Words Only":
+        conn = get_db_connection()
+        bad_list = [row['word'] for row in conn.execute("SELECT DISTINCT word FROM scores WHERE correctly_spelled = 0").fetchall()]
+        conn.close()
+        available_words = words_df[words_df['word'].isin(bad_list)]
     else:
-        num = int(selection.split()[-1])
-        size = len(words_df) // 13
-        pool = words_df.iloc[(num-1)*size : num*size]
+        words_per_group = max(1, len(words_df) // 13)
+        start_idx = (exam_group - 1) * words_per_group
+        end_idx = start_idx + words_per_group if exam_group < 13 else len(words_df)
+        available_words = words_df.iloc[start_idx:end_idx]
 
-    # 2. Check if we need to refill or shuffle the queue
-    # This ensures we don't repeat words until all are used
-    if not pool.empty:
-        # Check if the queue is empty OR if the user changed the group selection
-        if not st.session_state.shuffled_queue or st.session_state.get("last_selection") != selection:
-            indices = pool.index.tolist()
-            random.shuffle(indices)
-            st.session_state.shuffled_queue = indices
-            st.session_state.last_selection = selection # Remember what we're practicing
-            st.session_state.current_word = pool.loc[st.session_state.shuffled_queue.pop(0)]
+    if not available_words.empty:
+        if st.session_state.current_word is None or st.session_state.current_word["word"] not in available_words["word"].values:
+            st.session_state.current_word = available_words.sample(1).iloc[0]
+            st.session_state.attempts = 0
 
-    # Display Remaining Progress
-    st.write(f"🔮 Progress: {len(st.session_state.shuffled_queue)} words remaining in this set.")
+        # Progress Bar
+        conn = get_db_connection()
+        today_date = date.today().isoformat()
+        row = conn.execute("SELECT correct_count FROM daily_exam_progress WHERE date = ?", (today_date,)).fetchone()
+        score_today = row[0] if row else 0
+        conn.close()
+        st.progress(min(score_today / DAILY_EXAM_GOAL, 1.0))
+        st.write(f"Daily Progress: **{score_today} / {DAILY_EXAM_GOAL}**")
 
-    if st.session_state.current_word is not None:
-        curr = st.session_state.current_word
-        word_val = str(curr.iloc[1]).strip()
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔊 HEAR MAGIC WORD"):
-                tts = gTTS(text=word_val, lang='en')
-                audio_io = io.BytesIO()
-                tts.write_to_fp(audio_io)
-                st.audio(audio_io, format="audio/mp3", autoplay=True)
-        
-        with col2:
-            if st.button("⏭️ SKIP TO NEXT"):
-                if st.session_state.shuffled_queue:
-                    st.session_state.current_word = pool.loc[st.session_state.shuffled_queue.pop(0)]
-                else:
-                    st.session_state.shuffled_queue = [] # This will trigger a reshuffle on next rerun
-                st.rerun()
+        # Audio
+        word_to_spell = st.session_state.current_word["word"]
+        audio_io = io.BytesIO()
+        gTTS(text=str(word_to_spell), lang="en").write_to_fp(audio_io)
+        st.audio(audio_io, format="audio/mp3")
 
         with st.form(key="spell_form", clear_on_submit=True):
-            user_input = st.text_input("Type your spell here:")
-            if st.form_submit_button("🔥 CAST SPELL"):
-                is_correct = user_input.strip().lower() == word_val.lower()
+            user_input = st.text_input("Type the word:")
+            if st.form_submit_button("Check"):
+                st.session_state.attempts += 1
+                is_correct = user_input.strip().lower() == str(word_to_spell).strip().lower()
                 
-                # Save to database (Logic preserved)
                 conn = get_db_connection()
-                conn.execute("INSERT INTO scores (date, word, correctly_spelled) VALUES (?, ?, ?)", 
-                             (date.today().isoformat(), word_val, int(is_correct)))
+                conn.execute("INSERT INTO scores (date, word, correctly_spelled, attempts) VALUES (?, ?, ?, ?)",
+                             (today_date, word_to_spell, int(is_correct), st.session_state.attempts))
+                
+                st.session_state.last_result = {
+                    "is_correct": is_correct, "word": word_to_spell,
+                    "definition": st.session_state.current_word["definition"]
+                }
+
+                if is_correct:
+                    conn.execute("INSERT INTO daily_exam_progress (date, correct_count, total_attempted) VALUES (?, 1, 1) ON CONFLICT(date) DO UPDATE SET correct_count = correct_count + 1, total_attempted = total_attempted + 1", (today_date,))
+                    st.session_state.current_word = available_words.sample(1).iloc[0]
+                    st.session_state.attempts = 0
+                else:
+                    conn.execute("INSERT INTO daily_exam_progress (date, total_attempted) VALUES (?, 1) ON CONFLICT(date) DO UPDATE SET total_attempted = total_attempted + 1", (today_date,))
                 conn.commit()
                 conn.close()
-                
-                if is_correct:
-                    st.success(f"✨ Correct! '{word_val}' perfectly spelled.")
-                    # If correct, pull the next word from the shuffled deck
-                    if st.session_state.shuffled_queue:
-                        st.session_state.current_word = pool.loc[st.session_state.shuffled_queue.pop(0)]
-                    else:
-                        st.session_state.shuffled_queue = []
-                        st.balloons()
-                        st.success("Set Complete! Reshuffling...")
-                else:
-                    st.error(f"❌ Spell Fizzled! The word was: {word_val}")
-                
-                # Show definition
-                st.markdown(f"""
-                    <div class="study-row">
-                        <b>Definition:</b> {curr.iloc[2]}
-                    </div>
-                """, unsafe_allow_html=True)
+                st.rerun()
+
+        if st.session_state.last_result:
+            res = st.session_state.last_result
+            if res["is_correct"]: st.success("✅ Correct!")
+            else:
+                st.error("❌ Incorrect")
+                st.subheader(f"Correct Spelling: :green[{res['word']}]")
+                st.write(f"**Meaning:** {res['definition']}")
+       
+            if st.button("Next Word"):
+                st.session_state.last_result = None
+                st.rerun()
+    else:
+        st.info("No words found in this mode.")
 
 # --- 2. MODIFIED TAB 2 CODE ---
 with tab_learn:
@@ -255,6 +257,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
