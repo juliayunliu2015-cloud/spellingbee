@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import os
-import random
+# import random
 import io
 from datetime import date
 from gtts import gTTS
@@ -257,6 +257,7 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
 
 
 
