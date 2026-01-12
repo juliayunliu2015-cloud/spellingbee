@@ -153,7 +153,7 @@ st.markdown("""
 # --- ENCOURAGEMENT HEADER ---
 st.markdown("""
     <div style="
-        background: linear-gradient(135deg, rgba(45, 27, 61, 0.95) 0%, rgba(88, 28, 135, 0.8) 100%), 
+        background: linear-gradient(to right, rgba(26, 16, 34, 0.9) 0%, rgba(26, 16, 34, 0.2) 60%, rgba(26, 16, 34, 0) 100%), 
                     url(https://lh3.googleusercontent.com/aida-public/AB6AXuCr7AYPvVeqUPBshUWTIWJ2iXIQ-8K8woQJVGZzn3gXZOsD91x8eOwU5k1T9eDH0b8uekjykG9rQWN9kNidIOCSsd7p06J8IQ-11QKISWUKktStRsvX6OMpfJvCsTRYpo0Od6Lo3PzYt_R-4ub7Qf8h2gF39R8zVmMyA__pbMkAN2-H2q9T7SHEMfm5ULKJ1bkUS8YXaE2PlMU-5ep8QL2i4x-7ScztKYKjlG8ZguBjXW60PcBOj9SX88vAxsPyEuuZpbcOYlkE3Uc);
         background-size: cover;
         background-position: center;
@@ -427,3 +427,4 @@ with tab_stats:
             st.rerun()
     finally:
         conn.close()
+
